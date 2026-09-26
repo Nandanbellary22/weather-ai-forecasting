@@ -9,24 +9,24 @@ BASE_URL = (
     "baocaothuydiens_thongke"
 )
 
-START_DATE = "2026-07-01"
+START_DATE = "2026-01-15"
 END_DATE = "2026-07-13"
 
 OUTPUT_DIR = "data/processed"
 
-RAW_OUTPUT = os.path.join(
+RAW_INPUT = os.path.join(
     OUTPUT_DIR,
-    "pctt_raw_13days.csv"
+    "pctt_historical_180days_raw.csv"
 )
 
 CLEAN_OUTPUT = os.path.join(
     OUTPUT_DIR,
-    "pctt_clean_13days.csv"
+    "pctt_historical_180days_clean.csv"
 )
 
 QUALITY_OUTPUT = os.path.join(
     OUTPUT_DIR,
-    "pctt_quality_report.csv"
+    "pctt_historical_180days_quality_report.csv"
 )
 
 
@@ -58,36 +58,39 @@ EXPECTED_FIELDS = [
 NUMERIC_FIELDS = [
     field
     for field in EXPECTED_FIELDS
-    if field not in ["thoigianxa", "ngay", "gio"]
+    if field not in [
+        "thoigianxa",
+        "ngay",
+        "gio",
+    ]
 ]
 
 
-def fetch_day(date_str):
-    params = {
-        "ngaybatdau": f"{date_str}T00:00:00+07:00",
-        "ngayketthuc": f"{date_str}T23:59:59+07:00",
-        "lst_thuydien_id": "1,2,3,4",
-    }
+def rows_are_identical(group):
+    """
+    Return True when all records for a timestamp
+    contain identical values.
+    """
 
-    response = requests.get(
-        BASE_URL,
-        params=params,
-        timeout=30,
+    comparison_columns = [
+        field
+        for field in EXPECTED_FIELDS
+        if field != "thoigianxa"
+    ]
+
+    return (
+        group[comparison_columns]
+        .nunique(dropna=False)
+        .max()
+        <= 1
     )
-
-    response.raise_for_status()
-
-    data = response.json()
-
-    if not isinstance(data, list):
-        raise ValueError(
-            "API response is not a JSON list."
-        )
-
-    return pd.DataFrame(data)
 
 
 def standardize_dataframe(df):
+    """
+    Validate and standardize the historical raw dataset.
+    """
+
     missing_fields = [
         field
         for field in EXPECTED_FIELDS
@@ -99,60 +102,45 @@ def standardize_dataframe(df):
             f"Missing API fields: {missing_fields}"
         )
 
-    df = df[EXPECTED_FIELDS].copy()
+    df = df[
+        EXPECTED_FIELDS
+        + ["timestamp", "source_date"]
+    ].copy()
 
     df["timestamp"] = pd.to_datetime(
-        df["thoigianxa"],
-        errors="coerce"
+        df["timestamp"],
+        errors="coerce",
     )
 
     for field in NUMERIC_FIELDS:
         df[field] = pd.to_numeric(
             df[field],
-            errors="coerce"
+            errors="coerce",
         )
 
     return df
 
 
-def rows_are_identical(group):
-    """
-    Returns True if all records for a timestamp
-    contain identical values.
-    """
+def process_dataset(df):
 
-    comparison_columns = [
-        field
-        for field in EXPECTED_FIELDS
-        if field not in ["thoigianxa"]
-    ]
-
-    return (
-        group[comparison_columns]
-        .nunique(dropna=False)
-        .max()
-        <= 1
-    )
-
-
-def process_day(df, date_str):
     quality_records = []
 
     # --------------------------------------------------
-    # 1. Check timestamps
+    # 1. Invalid timestamps
     # --------------------------------------------------
 
     invalid_timestamp = df["timestamp"].isna()
 
     if invalid_timestamp.any():
+
         quality_records.append({
-            "date": date_str,
+            "date": "",
             "timestamp": "",
             "issue_type": "invalid_timestamp",
             "number_of_records": int(
                 invalid_timestamp.sum()
             ),
-            "resolution": "flagged",
+            "resolution": "removed_from_clean_dataset",
         })
 
         df = df[
@@ -160,10 +148,14 @@ def process_day(df, date_str):
         ].copy()
 
     # --------------------------------------------------
-    # 2. Missing values
+    # 2. Missing numeric values
     # --------------------------------------------------
 
-    missing_mask = df[NUMERIC_FIELDS].isna().any(axis=1)
+    missing_mask = (
+        df[NUMERIC_FIELDS]
+        .isna()
+        .any(axis=1)
+    )
 
     for _, row in df[missing_mask].iterrows():
 
@@ -174,7 +166,7 @@ def process_day(df, date_str):
         ]
 
         quality_records.append({
-            "date": date_str,
+            "date": row["source_date"],
             "timestamp": row["timestamp"],
             "issue_type": "missing_values",
             "number_of_records": 1,
@@ -188,8 +180,9 @@ def process_day(df, date_str):
     # 3. Duplicate timestamp detection
     # --------------------------------------------------
 
-    duplicate_mask = df["timestamp"].duplicated(
-        keep=False
+    duplicate_mask = (
+        df["timestamp"]
+        .duplicated(keep=False)
     )
 
     duplicate_groups = (
@@ -197,20 +190,23 @@ def process_day(df, date_str):
         .groupby("timestamp", sort=True)
     )
 
-    rows_to_keep = []
+    conflicting_timestamps = set()
+
+    exact_duplicate_timestamps = set()
 
     for timestamp, group in duplicate_groups:
 
         if rows_are_identical(group):
 
-            # Exact duplicate.
-            # Keep the first copy only.
-            rows_to_keep.append(
-                group.index[0]
+            exact_duplicate_timestamps.add(
+                timestamp
             )
 
             quality_records.append({
-                "date": date_str,
+                "date": (
+                    group["source_date"]
+                    .iloc[0]
+                ),
                 "timestamp": timestamp,
                 "issue_type": "exact_duplicate",
                 "number_of_records": len(group),
@@ -219,39 +215,27 @@ def process_day(df, date_str):
 
         else:
 
-            # Conflicting duplicate.
-            # Do NOT silently choose one.
+            conflicting_timestamps.add(
+                timestamp
+            )
+
             quality_records.append({
-                "date": date_str,
+                "date": (
+                    group["source_date"]
+                    .iloc[0]
+                ),
                 "timestamp": timestamp,
                 "issue_type": "conflicting_duplicate",
                 "number_of_records": len(group),
-                "resolution": "flagged_not_automatically_resolved",
+                "resolution": (
+                    "flagged_and_removed_from_"
+                    "clean_dataset"
+                ),
             })
 
-            # We deliberately keep ALL conflicting
-            # records in the raw dataset but exclude
-            # them from the clean forecasting dataset.
-
     # --------------------------------------------------
-    # 4. Build clean dataset
+    # 4. Remove conflicting duplicates
     # --------------------------------------------------
-
-    duplicate_timestamps = set(
-        df.loc[
-            duplicate_mask,
-            "timestamp"
-        ]
-    )
-
-    # Remove every timestamp involved in a
-    # conflicting duplicate.
-    conflicting_timestamps = set()
-
-    for timestamp, group in duplicate_groups:
-
-        if not rows_are_identical(group):
-            conflicting_timestamps.add(timestamp)
 
     clean_df = df[
         ~df["timestamp"].isin(
@@ -259,16 +243,20 @@ def process_day(df, date_str):
         )
     ].copy()
 
-    # Remove exact duplicate rows while retaining
-    # the first observation.
+    # --------------------------------------------------
+    # 5. Remove exact duplicate copies
+    # --------------------------------------------------
+
     clean_df = clean_df.drop_duplicates(
         subset=EXPECTED_FIELDS,
-        keep="first"
+        keep="first",
     )
 
     clean_df = clean_df.sort_values(
         "timestamp"
-    ).reset_index(drop=True)
+    ).reset_index(
+        drop=True
+    )
 
     return clean_df, quality_records
 
@@ -276,142 +264,63 @@ def process_day(df, date_str):
 def main():
 
     print("=" * 80)
-    print("PCTT RAW + QUALITY-CONTROL PIPELINE")
+    print("PCTT HISTORICAL 180-DAY QUALITY CONTROL")
     print("=" * 80)
+
+    print(
+        f"Input : {RAW_INPUT}"
+    )
+
+    print(
+        f"Period: {START_DATE} → {END_DATE}"
+    )
+
+    print()
 
     os.makedirs(
         OUTPUT_DIR,
-        exist_ok=True
+        exist_ok=True,
     )
 
-    dates = pd.date_range(
-        START_DATE,
-        END_DATE,
-        freq="D"
+    # --------------------------------------------------
+    # Load raw dataset
+    # --------------------------------------------------
+
+    if not os.path.exists(RAW_INPUT):
+
+        raise FileNotFoundError(
+            f"Raw PCTT dataset not found: {RAW_INPUT}"
+        )
+
+    raw_df = pd.read_csv(
+        RAW_INPUT
     )
 
-    raw_frames = []
-    clean_frames = []
-    quality_records = []
+    print(
+        f"Raw rows loaded: {len(raw_df)}"
+    )
 
-    for date in dates:
-
-        date_str = date.strftime(
-            "%Y-%m-%d"
-        )
-
-        print(
-            f"\nFetching {date_str}..."
-        )
-
-        try:
-
-            raw_df = fetch_day(
-                date_str
-            )
-
-            raw_df = standardize_dataframe(
-                raw_df
-            )
-
-            raw_df["source_date"] = date_str
-
-            raw_frames.append(
-                raw_df
-            )
-
-            clean_df, day_quality = (
-                process_day(
-                    raw_df,
-                    date_str
-                )
-            )
-
-            clean_df["source_date"] = date_str
-
-            clean_frames.append(
-                clean_df
-            )
-
-            quality_records.extend(
-                day_quality
-            )
-
-            print(
-                f"  Raw rows   : {len(raw_df)}"
-            )
-
-            print(
-                f"  Clean rows : {len(clean_df)}"
-            )
-
-            print(
-                f"  QC issues  : {len(day_quality)}"
-            )
-
-        except Exception as exc:
-
-            print(
-                f"  ERROR: {exc}"
-            )
-
-            quality_records.append({
-                "date": date_str,
-                "timestamp": "",
-                "issue_type": "api_error",
-                "number_of_records": 0,
-                "resolution": str(exc),
-            })
+    print(
+        f"Raw columns    : {len(raw_df.columns)}"
+    )
 
     # --------------------------------------------------
-    # Save raw data
+    # Standardize
     # --------------------------------------------------
 
-    if raw_frames:
+    raw_df = standardize_dataframe(
+        raw_df
+    )
 
-        raw_all = pd.concat(
-            raw_frames,
-            ignore_index=True
+    # --------------------------------------------------
+    # Process
+    # --------------------------------------------------
+
+    clean_df, quality_records = (
+        process_dataset(
+            raw_df
         )
-
-        raw_all = raw_all.sort_values(
-            "timestamp"
-        ).reset_index(drop=True)
-
-        raw_all.to_csv(
-            RAW_OUTPUT,
-            index=False
-        )
-
-    else:
-        raw_all = pd.DataFrame()
-
-    # --------------------------------------------------
-    # Save clean data
-    # --------------------------------------------------
-
-    if clean_frames:
-
-        clean_all = pd.concat(
-            clean_frames,
-            ignore_index=True
-        )
-
-        clean_all = clean_all.sort_values(
-            "timestamp"
-        ).reset_index(drop=True)
-
-        clean_all.to_csv(
-            CLEAN_OUTPUT,
-            index=False
-        )
-
-    else:
-        clean_all = pd.DataFrame()
-
-    # --------------------------------------------------
-    # Save quality report
-    # --------------------------------------------------
+    )
 
     quality_df = pd.DataFrame(
         quality_records,
@@ -421,12 +330,25 @@ def main():
             "issue_type",
             "number_of_records",
             "resolution",
-        ]
+        ],
     )
+
+    # --------------------------------------------------
+    # Save clean dataset
+    # --------------------------------------------------
+
+    clean_df.to_csv(
+        CLEAN_OUTPUT,
+        index=False,
+    )
+
+    # --------------------------------------------------
+    # Save quality report
+    # --------------------------------------------------
 
     quality_df.to_csv(
         QUALITY_OUTPUT,
-        index=False
+        index=False,
     )
 
     # --------------------------------------------------
@@ -435,44 +357,117 @@ def main():
 
     print()
     print("=" * 80)
-    print("FINAL SUMMARY")
+    print("FINAL QUALITY-CONTROL SUMMARY")
     print("=" * 80)
 
     print(
-        f"Raw rows          : {len(raw_all)}"
+        f"Raw rows       : {len(raw_df)}"
     )
 
     print(
-        f"Clean rows        : {len(clean_all)}"
+        f"Clean rows     : {len(clean_df)}"
     )
 
     print(
-        f"QC records        : {len(quality_df)}"
+        f"Rows removed   : "
+        f"{len(raw_df) - len(clean_df)}"
+    )
+
+    print(
+        f"QC records     : {len(quality_df)}"
     )
 
     if not quality_df.empty:
 
         print()
-        print("QC issues:")
+        print("QC issue counts")
+        print("-" * 80)
 
         print(
             quality_df[
                 "issue_type"
-            ].value_counts().to_string()
+            ]
+            .value_counts()
+            .to_string()
         )
 
     print()
+    print("Clean dataset")
+    print("-" * 80)
+
     print(
-        f"Raw output        : {RAW_OUTPUT}"
+        f"Start time     : "
+        f"{clean_df['timestamp'].min()}"
     )
 
     print(
-        f"Clean output      : {CLEAN_OUTPUT}"
+        f"End time       : "
+        f"{clean_df['timestamp'].max()}"
+    )
+
+    print()
+    print("Missing values in clean dataset")
+    print("-" * 80)
+
+    missing_counts = (
+        clean_df[
+            NUMERIC_FIELDS
+        ]
+        .isna()
+        .sum()
+    )
+
+    missing_counts = (
+        missing_counts[
+            missing_counts > 0
+        ]
+    )
+
+    if missing_counts.empty:
+
+        print(
+            "No missing numeric values."
+        )
+
+    else:
+
+        print(
+            missing_counts.to_string()
+        )
+
+    print()
+    print("Duplicate timestamps remaining")
+    print("-" * 80)
+
+    remaining_duplicates = (
+        clean_df["timestamp"]
+        .duplicated(
+            keep=False
+        )
+        .sum()
     )
 
     print(
-        f"Quality report    : {QUALITY_OUTPUT}"
+        f"Duplicate timestamp rows: "
+        f"{remaining_duplicates}"
     )
+
+    print()
+    print("Output files")
+    print("-" * 80)
+
+    print(
+        f"Clean dataset : {CLEAN_OUTPUT}"
+    )
+
+    print(
+        f"Quality report: {QUALITY_OUTPUT}"
+    )
+
+    print()
+    print("=" * 80)
+    print("PCTT QUALITY CONTROL COMPLETE")
+    print("=" * 80)
 
 
 if __name__ == "__main__":
