@@ -1,22 +1,35 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
-from backend.routes.forecasts import router as forecast_router
-from backend.routes.stations import router as station_router
+from backend.routes.forecasts import router as forecasts_router
+from backend.routes.stations import router as stations_router
 from backend.schemas import HealthResponse
 
 
 app = FastAPI(
     title="Hydrometeorological AI Forecasting API",
-    description=(
-        "API for hydrological observations and 24-hour "
-        "machine-learning forecasts."
-    ),
     version="0.1.0",
+    description=(
+        "API for hydrological station data, machine-learning forecasts, "
+        "and hydrometeorological WebGIS integration."
+    ),
 )
 
 
-app.include_router(station_router)
-app.include_router(forecast_router)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+app.include_router(stations_router)
+app.include_router(forecasts_router)
 
 
 @app.get(
@@ -31,11 +44,13 @@ def health() -> HealthResponse:
     )
 
 
-@app.get("/", tags=["System"])
+@app.get(
+    "/",
+    tags=["System"],
+)
 def root() -> dict[str, str]:
     return {
-        "name": "Hydrometeorological AI Forecasting API",
-        "version": "0.1.0",
+        "message": "Hydrometeorological AI Forecasting API",
         "docs": "/docs",
         "health": "/health",
     }

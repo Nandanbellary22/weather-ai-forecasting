@@ -1,287 +1,620 @@
-from __future__ import annotations
-
+import os
 from pathlib import Path
-from typing import Any
 
+import numpy as np
 import pandas as pd
+import psycopg2
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 
 
-DATA_PATH = (
-    Path(__file__).resolve().parents[2]
-    / "data"
-    / "processed"
-    / "historical_180days_all_stations.csv"
-)
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+DB_CONFIG = {
+    "host": "localhost",
+    "port": 5432,
+    "database": "weather_forecasting",
+    "user": "postgres",
+}
+
+
+def get_connection():
+    password = os.getenv("POSTGRES_PASSWORD")
+
+    if not password:
+        raise RuntimeError(
+            "POSTGRES_PASSWORD environment variable is not set."
+        )
+
+    return psycopg2.connect(
+        host=DB_CONFIG["host"],
+        port=DB_CONFIG["port"],
+        database=DB_CONFIG["database"],
+        user=DB_CONFIG["user"],
+        password=password,
+    )
 
 
 def load_data() -> pd.DataFrame:
-    """Load and standardize the historical hydrology dataset."""
+    """
+    Load hydrology observations directly from PostgreSQL.
+    """
 
-    if not DATA_PATH.exists():
-        raise FileNotFoundError(f"Dataset not found: {DATA_PATH}")
+    query = """
+        SELECT
+            station_id,
+            timestamp,
+            value
+        FROM hydrology_observations
+        ORDER BY station_id, timestamp
+    """
 
-    df = pd.read_csv(DATA_PATH)
+    connection = get_connection()
 
-    required_columns = {"station_id", "timestamp", "value"}
+    try:
+        df = pd.read_sql_query(query, connection)
+    finally:
+        connection.close()
+
+    if df.empty:
+        raise ValueError(
+            "No hydrology observations found in PostgreSQL."
+        )
+
+    required_columns = {
+        "station_id",
+        "timestamp",
+        "value",
+    }
 
     missing = required_columns - set(df.columns)
 
     if missing:
         raise ValueError(
-            f"Dataset is missing required columns: {sorted(missing)}"
+            f"Missing database columns: {sorted(missing)}"
         )
 
-    df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
-    df["value"] = pd.to_numeric(df["value"], errors="coerce")
-    df["station_id"] = pd.to_numeric(
-        df["station_id"], errors="coerce"
-    ).astype("Int64")
+    df["station_id"] = df["station_id"].astype(str)
 
-    df = df.dropna(subset=["station_id", "timestamp"])
-    df = df.sort_values(["station_id", "timestamp"])
+    df["timestamp"] = pd.to_datetime(
+        df["timestamp"],
+        errors="coerce",
+    )
 
-    return df.reset_index(drop=True)
+    df["value"] = pd.to_numeric(
+        df["value"],
+        errors="coerce",
+    )
 
-
-def create_features(
-    station_df: pd.DataFrame,
-    lags: tuple[int, ...] = (1, 3, 6, 12, 24),
-) -> pd.DataFrame:
-    """Create time-series features for one station."""
-
-    df = station_df.copy()
-
-    df = df.sort_values("timestamp").reset_index(drop=True)
-
-    df["hour"] = df["timestamp"].dt.hour
-    df["day_of_week"] = df["timestamp"].dt.dayofweek
-    df["day_of_month"] = df["timestamp"].dt.day
-
-    for lag in lags:
-        df[f"lag_{lag}"] = df["value"].shift(lag)
-
-    df["rolling_mean_6"] = df["value"].shift(1).rolling(6).mean()
-    df["rolling_mean_12"] = df["value"].shift(1).rolling(12).mean()
-    df["rolling_mean_24"] = df["value"].shift(1).rolling(24).mean()
+    df = df.sort_values(
+        ["station_id", "timestamp"]
+    ).reset_index(drop=True)
 
     return df
 
 
-def train_model(
-    station_id: int,
-    model_type: str = "random_forest",
-) -> tuple[Any, list[str], dict[str, float]]:
+def create_features(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Train a forecasting model for one station.
+    Create temporal and lag features.
+    """
 
-    The final 20% of observations are reserved as a time-ordered
-    test set. No random shuffling is used.
+    data = df.copy()
+
+    data["hour"] = data["timestamp"].dt.hour
+    data["day_of_week"] = data["timestamp"].dt.dayofweek
+    data["day_of_month"] = data["timestamp"].dt.day
+
+    data["lag_1"] = data["value"].shift(1)
+    data["lag_3"] = data["value"].shift(3)
+    data["lag_6"] = data["value"].shift(6)
+    data["lag_12"] = data["value"].shift(12)
+    data["lag_24"] = data["value"].shift(24)
+
+    data["rolling_mean_6"] = (
+        data["value"]
+        .rolling(6)
+        .mean()
+    )
+
+    data["rolling_mean_12"] = (
+        data["value"]
+        .rolling(12)
+        .mean()
+    )
+
+    data["rolling_mean_24"] = (
+        data["value"]
+        .rolling(24)
+        .mean()
+    )
+
+    return data
+
+
+FEATURE_COLUMNS = [
+    "hour",
+    "day_of_week",
+    "day_of_month",
+    "lag_1",
+    "lag_3",
+    "lag_6",
+    "lag_12",
+    "lag_24",
+    "rolling_mean_6",
+    "rolling_mean_12",
+    "rolling_mean_24",
+]
+
+
+def train_model(
+    station_id: str,
+    model_type: str = "random_forest",
+):
+    """
+    Train a forecasting model using PostgreSQL observations.
     """
 
     df = load_data()
 
-    station_df = df[df["station_id"] == station_id].copy()
+    station_id = str(station_id)
+
+    station_df = df[
+        df["station_id"] == station_id
+    ].copy()
 
     if station_df.empty:
-        raise ValueError(f"No data found for station {station_id}")
+        raise ValueError(
+            f"No data found for station {station_id}."
+        )
 
     station_df = create_features(station_df)
 
-    feature_columns = [
-        "hour",
-        "day_of_week",
-        "day_of_month",
-        "lag_1",
-        "lag_3",
-        "lag_6",
-        "lag_12",
-        "lag_24",
-        "rolling_mean_6",
-        "rolling_mean_12",
-        "rolling_mean_24",
-    ]
-
-    model_df = station_df.dropna(
-        subset=feature_columns + ["value"]
+    model_data = station_df.dropna(
+        subset=FEATURE_COLUMNS + ["value"]
     ).copy()
 
-    if len(model_df) < 100:
+    if len(model_data) < 100:
         raise ValueError(
-            f"Insufficient training data for station {station_id}: "
-            f"{len(model_df)} rows"
+            f"Not enough valid observations for station {station_id}."
         )
 
-    split_index = int(len(model_df) * 0.8)
+    split_index = int(
+        len(model_data) * 0.80
+    )
 
-    train_df = model_df.iloc[:split_index]
-    test_df = model_df.iloc[split_index:]
+    train_df = model_data.iloc[:split_index]
+    test_df = model_data.iloc[split_index:]
 
-    X_train = train_df[feature_columns]
+    X_train = train_df[FEATURE_COLUMNS]
     y_train = train_df["value"]
 
-    X_test = test_df[feature_columns]
+    X_test = test_df[FEATURE_COLUMNS]
     y_test = test_df["value"]
 
-    if model_type == "linear_regression":
-        model = LinearRegression()
+    if model_type == "random_forest":
 
-    elif model_type == "random_forest":
         model = RandomForestRegressor(
             n_estimators=200,
             random_state=42,
             n_jobs=-1,
-            max_depth=None,
         )
 
+    elif model_type == "linear_regression":
+
+        model = LinearRegression()
+
     else:
+
         raise ValueError(
-            "Unsupported model_type. "
+            "Unsupported model type. "
             "Use 'random_forest' or 'linear_regression'."
         )
 
-    model.fit(X_train, y_train)
+    model.fit(
+        X_train,
+        y_train,
+    )
 
     predictions = model.predict(X_test)
 
-    mae = mean_absolute_error(y_test, predictions)
-
-    rmse = mean_squared_error(
+    mae = mean_absolute_error(
         y_test,
         predictions,
-    ) ** 0.5
+    )
+
+    rmse = np.sqrt(
+        mean_squared_error(
+            y_test,
+            predictions,
+        )
+    )
 
     metrics = {
         "mae": float(mae),
         "rmse": float(rmse),
         "train_rows": int(len(train_df)),
         "test_rows": int(len(test_df)),
+        "training_start": train_df["timestamp"].min(),
+        "training_end": train_df["timestamp"].max(),
     }
 
-    return model, feature_columns, metrics
+    return model, station_df, metrics
 
 
 def forecast_next_24_hours(
-    station_id: int,
+    station_id: str,
     model_type: str = "random_forest",
-) -> dict[str, Any]:
+):
     """
-    Train a model using historical observations and recursively
-    forecast the next 24 hourly values.
+    Train a model and recursively forecast the next 24 hours.
+
+    The forecast is also saved into PostgreSQL.
     """
 
-    df = load_data()
-
-    station_df = df[df["station_id"] == station_id].copy()
-
-    if station_df.empty:
-        raise ValueError(f"No data found for station {station_id}")
-
-    station_df = station_df.sort_values("timestamp").reset_index(drop=True)
-
-    model, feature_columns, metrics = train_model(
+    model, station_df, metrics = train_model(
         station_id=station_id,
         model_type=model_type,
     )
 
-    history = station_df[
-        ["timestamp", "value"]
-    ].dropna(subset=["value"]).copy()
+    station_id = str(station_id)
 
-    if len(history) < 25:
+    history = station_df[
+        [
+            "timestamp",
+            "value",
+        ]
+    ].copy()
+
+    history = history.dropna(
+        subset=["value"]
+    ).sort_values(
+        "timestamp"
+    ).reset_index(drop=True)
+
+    if len(history) < 24:
         raise ValueError(
-            f"Not enough observations for forecasting station {station_id}"
+            "Not enough historical observations "
+            "for recursive forecasting."
         )
 
-    values = history["value"].tolist()
+    forecast_points = []
 
-    last_timestamp = history["timestamp"].iloc[-1]
+    values = list(
+        history["value"].astype(float)
+    )
 
-    forecasts = []
+    timestamps = list(
+        history["timestamp"]
+    )
+
+    last_timestamp = timestamps[-1]
 
     for step in range(1, 25):
+
         forecast_timestamp = (
-            last_timestamp + pd.Timedelta(hours=step)
+            last_timestamp
+            + pd.Timedelta(hours=step)
         )
 
-        recent_values = values
-
-        row = {
-            "hour": forecast_timestamp.hour,
-            "day_of_week": forecast_timestamp.dayofweek,
-            "day_of_month": forecast_timestamp.day,
-            "lag_1": recent_values[-1],
-            "lag_3": recent_values[-3],
-            "lag_6": recent_values[-6],
-            "lag_12": recent_values[-12],
-            "lag_24": recent_values[-24],
-            "rolling_mean_6": sum(recent_values[-6:]) / 6,
-            "rolling_mean_12": sum(recent_values[-12:]) / 12,
-            "rolling_mean_24": sum(recent_values[-24:]) / 24,
-        }
-
-        feature_df = pd.DataFrame(
-            [row],
-            columns=feature_columns,
+        current_hour = forecast_timestamp.hour
+        current_day_of_week = (
+            forecast_timestamp.dayofweek
+        )
+        current_day_of_month = (
+            forecast_timestamp.day
         )
 
-        prediction = float(model.predict(feature_df)[0])
+        lag_1 = values[-1]
+        lag_3 = values[-3]
+        lag_6 = values[-6]
+        lag_12 = values[-12]
+        lag_24 = values[-24]
 
-        forecasts.append(
-            {
-                "station_id": station_id,
-                "timestamp": forecast_timestamp.isoformat(),
-                "predicted_value": prediction,
-            }
+        rolling_mean_6 = float(
+            np.mean(values[-6:])
+        )
+
+        rolling_mean_12 = float(
+            np.mean(values[-12:])
+        )
+
+        rolling_mean_24 = float(
+            np.mean(values[-24:])
+        )
+
+        features = pd.DataFrame(
+            [
+                {
+                    "hour": current_hour,
+                    "day_of_week": current_day_of_week,
+                    "day_of_month": current_day_of_month,
+                    "lag_1": lag_1,
+                    "lag_3": lag_3,
+                    "lag_6": lag_6,
+                    "lag_12": lag_12,
+                    "lag_24": lag_24,
+                    "rolling_mean_6": rolling_mean_6,
+                    "rolling_mean_12": rolling_mean_12,
+                    "rolling_mean_24": rolling_mean_24,
+                }
+            ]
+        )
+
+        prediction = float(
+            model.predict(
+                features[FEATURE_COLUMNS]
+            )[0]
         )
 
         values.append(prediction)
 
-    return {
-        "station_id": station_id,
-        "model": model_type,
-        "forecast_horizon_hours": 24,
-        "last_observation": {
-            "timestamp": history["timestamp"].iloc[-1].isoformat(),
-            "value": float(history["value"].iloc[-1]),
-        },
-        "metrics": metrics,
-        "forecasts": forecasts,
-    }
-
-
-def get_station_summary() -> list[dict[str, Any]]:
-    """Return basic metadata for all available stations."""
-
-    df = load_data()
-
-    summaries = []
-
-    for station_id, station_df in df.groupby("station_id"):
-        numeric_values = station_df["value"].dropna()
-
-        summaries.append(
+        forecast_points.append(
             {
-                "station_id": int(station_id),
-                "observation_count": int(len(station_df)),
-                "valid_observation_count": int(len(numeric_values)),
-                "missing_value_count": int(
-                    station_df["value"].isna().sum()
-                ),
-                "start_time": station_df["timestamp"]
-                .min()
-                .isoformat(),
-                "end_time": station_df["timestamp"]
-                .max()
-                .isoformat(),
-                "latest_value": (
-                    float(numeric_values.iloc[-1])
-                    if not numeric_values.empty
-                    else None
-                ),
+                "timestamp": forecast_timestamp,
+                "value": prediction,
             }
         )
 
-    return summaries
+    save_forecast_run(
+        station_id=station_id,
+        model_type=model_type,
+        metrics=metrics,
+        forecast_points=forecast_points,
+    )
+
+    last_observation = history.iloc[-1]
+
+    return {
+        "station_id": station_id,
+        "model": model_type,
+        "metrics": {
+            "mae": metrics["mae"],
+            "rmse": metrics["rmse"],
+            "train_rows": metrics["train_rows"],
+            "test_rows": metrics["test_rows"],
+        },
+        "last_observation": {
+            "timestamp": last_observation["timestamp"],
+            "value": float(
+                last_observation["value"]
+            ),
+        },
+        "forecast": [
+            {
+                "timestamp": point["timestamp"],
+                "value": point["value"],
+            }
+            for point in forecast_points
+        ],
+    }
+
+
+def save_forecast_run(
+    station_id: str,
+    model_type: str,
+    metrics: dict,
+    forecast_points: list,
+):
+    """
+    Save forecast metadata and forecast values
+    into PostgreSQL.
+    """
+
+    connection = get_connection()
+
+    try:
+        with connection:
+            with connection.cursor() as cursor:
+
+                insert_run = """
+                    INSERT INTO forecast_runs
+                    (
+                        station_id,
+                        model_type,
+                        training_start,
+                        training_end,
+                        train_rows,
+                        test_rows,
+                        mae,
+                        rmse
+                    )
+                    VALUES
+                    (
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        %s
+                    )
+                    RETURNING id
+                """
+
+                cursor.execute(
+                    insert_run,
+                    (
+                        station_id,
+                        model_type,
+                        metrics["training_start"],
+                        metrics["training_end"],
+                        metrics["train_rows"],
+                        metrics["test_rows"],
+                        metrics["mae"],
+                        metrics["rmse"],
+                    ),
+                )
+
+                forecast_run_id = cursor.fetchone()[0]
+
+                values = [
+                    (
+                        forecast_run_id,
+                        station_id,
+                        point["timestamp"],
+                        point["value"],
+                    )
+                    for point in forecast_points
+                ]
+
+                insert_values = """
+                    INSERT INTO forecast_values
+                    (
+                        forecast_run_id,
+                        station_id,
+                        forecast_timestamp,
+                        predicted_value
+                    )
+                    VALUES %s
+                """
+
+                from psycopg2.extras import execute_values
+
+                execute_values(
+                    cursor,
+                    insert_values,
+                    values,
+                    page_size=100,
+                )
+
+                print(
+                    f"Saved forecast run: {forecast_run_id}"
+                )
+
+    finally:
+        connection.close()
+
+
+def get_station_summary():
+    """
+    Return summary information for all stations
+    directly from PostgreSQL.
+    """
+
+    query = """
+        SELECT
+            station_id,
+            COUNT(*) AS observations,
+            COUNT(value) AS valid_observations,
+            COUNT(*) - COUNT(value) AS missing_values,
+            MIN(timestamp) AS start_time,
+            MAX(timestamp) AS end_time
+        FROM hydrology_observations
+        GROUP BY station_id
+        ORDER BY station_id
+    """
+
+    connection = get_connection()
+
+    try:
+        summary_df = pd.read_sql_query(
+            query,
+            connection,
+        )
+    finally:
+        connection.close()
+
+    results = []
+
+    for row in summary_df.itertuples(
+        index=False
+    ):
+
+        latest_query = """
+            SELECT
+                value
+            FROM hydrology_observations
+            WHERE station_id = %s
+              AND value IS NOT NULL
+            ORDER BY timestamp DESC
+            LIMIT 1
+        """
+
+        connection = get_connection()
+
+        try:
+            latest_df = pd.read_sql_query(
+                latest_query,
+                connection,
+                params=[str(row.station_id)],
+            )
+        finally:
+            connection.close()
+
+        latest_value = None
+
+        if not latest_df.empty:
+            latest_value = float(
+                latest_df.iloc[0]["value"]
+            )
+
+        results.append(
+            {
+                "station_id": str(row.station_id),
+                "observations": int(
+                    row.observations
+                ),
+                "valid_observations": int(
+                    row.valid_observations
+                ),
+                "missing_values": int(
+                    row.missing_values
+                ),
+                "start_time": row.start_time,
+                "end_time": row.end_time,
+                "latest_value": latest_value,
+            }
+        )
+
+    return results
+
+
+if __name__ == "__main__":
+
+    print(
+        "Testing PostgreSQL-backed "
+        "forecast service..."
+    )
+
+    print("\n--- Station Summary ---")
+
+    summaries = get_station_summary()
+
+    for summary in summaries:
+        print(summary)
+
+    print("\n--- 24-Hour Forecast ---")
+
+    result = forecast_next_24_hours(
+        station_id="553100",
+        model_type="random_forest",
+    )
+
+    print(
+        f"Station: {result['station_id']}"
+    )
+
+    print(
+        f"Model: {result['model']}"
+    )
+
+    print(
+        f"MAE: {result['metrics']['mae']}"
+    )
+
+    print(
+        f"RMSE: {result['metrics']['rmse']}"
+    )
+
+    print(
+        f"Forecast points: "
+        f"{len(result['forecast'])}"
+    )
+
+    print("\nFirst 3 forecasts:")
+
+    for point in result["forecast"][:3]:
+        print(point)
