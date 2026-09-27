@@ -1,15 +1,13 @@
-from __future__ import annotations
-
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
 class StationSummary(BaseModel):
-    station_id: int
-    observation_count: int
-    valid_observation_count: int
-    missing_value_count: int
+    station_id: str
+    observations: int
+    valid_observations: int
+    missing_values: int
     start_time: datetime
     end_time: datetime
     latest_value: float | None
@@ -28,22 +26,17 @@ class LastObservation(BaseModel):
 
 
 class ForecastPoint(BaseModel):
-    station_id: int
     timestamp: datetime
-    predicted_value: float
+    value: float
 
 
 class ForecastResponse(BaseModel):
-    station_id: int
+    station_id: str
     model: str
-    forecast_horizon_hours: int = Field(
-        description="Number of hourly forecast points"
-    )
-    last_observation: LastObservation
     metrics: ForecastMetrics
-    forecasts: list[ForecastPoint]
+    last_observation: LastObservation
+    forecast: list[ForecastPoint]
 
 
 class HealthResponse(BaseModel):
     status: str
-    service: str

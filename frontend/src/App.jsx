@@ -1,14 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import {
+  CircleMarker,
   MapContainer,
-  Marker,
   Popup,
   TileLayer,
-  useMap,
 } from "react-leaflet";
-import L from "leaflet";
 import {
   CartesianGrid,
+  Legend,
   Line,
   LineChart,
   ResponsiveContainer,
@@ -21,6 +20,8 @@ import "./App.css";
 
 const API_BASE_URL = "http://127.0.0.1:8000";
 
+// Temporary display coordinates.
+// These are NOT verified real station coordinates.
 const STATION_COORDINATES = {
   553000: [16.047, 108.206],
   553100: [16.067, 108.215],
@@ -29,135 +30,131 @@ const STATION_COORDINATES = {
   553400: [16.030, 108.220],
 };
 
-const defaultCenter = [16.055, 108.205];
-
-const stationIcon = new L.Icon({
-  iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
-  iconRetinaUrl:
-    "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
-  shadowUrl:
-    "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-  popupAnchor: [1, -34],
-  shadowSize: [41, 41],
-});
-
-function MapCenter({ position }) {
-  const map = useMap();
-
-  useEffect(() => {
-    if (position) {
-      map.setView(position, 12);
-    }
-  }, [map, position]);
-
-  return null;
-}
-
 function App() {
   const [stations, setStations] = useState([]);
   const [selectedStation, setSelectedStation] = useState(null);
   const [forecast, setForecast] = useState(null);
+  const [pcttLatest, setPcttLatest] = useState(null);
+
   const [loadingStations, setLoadingStations] = useState(true);
   const [loadingForecast, setLoadingForecast] = useState(false);
-  const [error, setError] = useState("");
+  const [loadingPctt, setLoadingPctt] = useState(true);
+
+  const [error, setError] = useState(null);
 
   useEffect(() => {
-    async function loadStations() {
-      try {
-        setLoadingStations(true);
-        setError("");
-
-        const response = await fetch(`${API_BASE_URL}/stations`);
-
-        if (!response.ok) {
-          throw new Error(`Stations request failed: ${response.status}`);
-        }
-
-        const data = await response.json();
-
-        setStations(data);
-
-        if (data.length > 0) {
-          setSelectedStation(data[0]);
-        }
-      } catch (err) {
-        setError(err.message);
-      } finally {
-        setLoadingStations(false);
-      }
-    }
-
     loadStations();
+    loadPcttLatest();
   }, []);
 
   useEffect(() => {
-    async function loadForecast() {
-      if (!selectedStation) {
-        return;
+    if (selectedStation) {
+      loadForecast(selectedStation.station_id);
+    }
+  }, [selectedStation]);
+
+  async function loadStations() {
+    try {
+      setLoadingStations(true);
+      setError(null);
+
+      const response = await fetch(`${API_BASE_URL}/stations`);
+
+      if (!response.ok) {
+        throw new Error("Failed to load stations.");
       }
 
-      try {
-        setLoadingForecast(true);
-        setError("");
+      const data = await response.json();
 
-        const response = await fetch(
-          `${API_BASE_URL}/forecasts/${selectedStation.station_id}?model=random_forest`,
+      setStations(data);
+
+      if (data.length > 0) {
+        setSelectedStation(data[0]);
+      }
+    } catch (err) {
+      console.error("Station loading error:", err);
+      setError(err.message);
+    } finally {
+      setLoadingStations(false);
+    }
+  }
+
+  async function loadForecast(stationId) {
+    try {
+      setLoadingForecast(true);
+      setError(null);
+      setForecast(null);
+
+      const response = await fetch(
+        `${API_BASE_URL}/forecasts/${stationId}?model=random_forest`
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          `Failed to load forecast for station ${stationId}.`
         );
-
-        if (!response.ok) {
-          throw new Error(`Forecast request failed: ${response.status}`);
-        }
-
-        const data = await response.json();
-
-        setForecast(data);
-      } catch (err) {
-        setForecast(null);
-        setError(err.message);
-      } finally {
-        setLoadingForecast(false);
       }
+
+      const data = await response.json();
+
+      console.log("Forecast API response:", data);
+
+      setForecast(data);
+    } catch (err) {
+      console.error("Forecast loading error:", err);
+      setError(err.message);
+    } finally {
+      setLoadingForecast(false);
     }
+  }
 
-    loadForecast();
-  }, [selectedStation]);
+  async function loadPcttLatest() {
+    try {
+      setLoadingPctt(true);
+      setError(null);
 
-  const selectedPosition = useMemo(() => {
-    if (!selectedStation) {
-      return defaultCenter;
+      const response = await fetch(`${API_BASE_URL}/pctt/latest`);
+
+      if (!response.ok) {
+        throw new Error("Failed to load PCTT data.");
+      }
+
+      const data = await response.json();
+
+      console.log("PCTT API response:", data);
+
+      setPcttLatest(data);
+    } catch (err) {
+      console.error("PCTT loading error:", err);
+      setError(err.message);
+    } finally {
+      setLoadingPctt(false);
     }
+  }
 
-    return (
-      STATION_COORDINATES[selectedStation.station_id] || defaultCenter
-    );
-  }, [selectedStation]);
-
-  const chartData = useMemo(() => {
-    if (!forecast) {
-      return [];
-    }
-
-    return forecast.forecasts.map((point) => ({
-      time: new Date(point.timestamp).toLocaleTimeString([], {
+  // Backend returns "forecast", not "forecasts".
+  const forecastChartData =
+    forecast?.forecast?.map((item) => ({
+      time: new Date(item.timestamp).toLocaleTimeString([], {
         hour: "2-digit",
         minute: "2-digit",
       }),
-      value: Number(point.predicted_value.toFixed(3)),
-    }));
-  }, [forecast]);
+      value: item.value,
+    })) ?? [];
 
   return (
     <div className="app">
-      <header className="topbar">
+      <header className="header">
         <div>
           <h1>Hydrometeorological AI Forecasting</h1>
-          <p>Hydrological monitoring and 24-hour forecasting WebGIS</p>
+
+          <p>
+            Multi-source hydrology, hydropower and AI forecasting platform
+          </p>
         </div>
 
         <div className="status">
-          <span className="status-dot" />
+          <span className="status-dot"></span>
           API Connected
         </div>
       </header>
@@ -165,15 +162,28 @@ function App() {
       {error && <div className="error-banner">{error}</div>}
 
       <main className="dashboard">
-        <aside className="sidebar">
-          <section className="panel">
-            <div className="panel-heading">
-              <h2>Hydrological Stations</h2>
-              <span>{stations.length}</span>
+        {/* =========================================================
+            TOP SECTION
+        ========================================================= */}
+        <section className="top-grid">
+          {/* =======================================================
+              HYDROLOGY STATIONS
+          ======================================================= */}
+          <div className="card station-card">
+            <div className="card-header">
+              <h2>Hydrology Stations</h2>
+
+              <span>
+                {loadingStations
+                  ? "Loading..."
+                  : `${stations.length} stations`}
+              </span>
             </div>
 
             {loadingStations ? (
-              <p className="muted">Loading stations...</p>
+              <p>Loading stations...</p>
+            ) : stations.length === 0 ? (
+              <p>No stations available.</p>
             ) : (
               <div className="station-list">
                 {stations.map((station) => (
@@ -181,169 +191,239 @@ function App() {
                     key={station.station_id}
                     className={`station-item ${
                       selectedStation?.station_id === station.station_id
-                        ? "selected"
+                        ? "active"
                         : ""
                     }`}
                     onClick={() => setSelectedStation(station)}
                   >
                     <div>
                       <strong>Station {station.station_id}</strong>
+
                       <span>
-                        Latest: {station.latest_value ?? "No value"}
+                        {station.valid_observations} valid observations
                       </span>
                     </div>
 
-                    <div className="station-missing">
-                      {station.missing_value_count} missing
+                    <div className="station-value">
+                      {station.latest_value ?? "N/A"}
                     </div>
                   </button>
                 ))}
               </div>
             )}
-          </section>
-
-          {selectedStation && (
-            <section className="panel">
-              <h2>Station Details</h2>
-
-              <div className="detail-grid">
-                <div>
-                  <span>Station</span>
-                  <strong>{selectedStation.station_id}</strong>
-                </div>
-
-                <div>
-                  <span>Latest level</span>
-                  <strong>{selectedStation.latest_value}</strong>
-                </div>
-
-                <div>
-                  <span>Observations</span>
-                  <strong>{selectedStation.observation_count}</strong>
-                </div>
-
-                <div>
-                  <span>Missing</span>
-                  <strong>{selectedStation.missing_value_count}</strong>
-                </div>
-              </div>
-            </section>
-          )}
-
-          {forecast && (
-            <section className="panel">
-              <h2>Model Performance</h2>
-
-              <div className="metric-grid">
-                <div className="metric">
-                  <span>Model</span>
-                  <strong>{forecast.model}</strong>
-                </div>
-
-                <div className="metric">
-                  <span>MAE</span>
-                  <strong>{forecast.metrics.mae.toFixed(4)}</strong>
-                </div>
-
-                <div className="metric">
-                  <span>RMSE</span>
-                  <strong>{forecast.metrics.rmse.toFixed(4)}</strong>
-                </div>
-
-                <div className="metric">
-                  <span>Horizon</span>
-                  <strong>{forecast.forecast_horizon_hours}h</strong>
-                </div>
-              </div>
-            </section>
-          )}
-        </aside>
-
-        <section className="content">
-          <div className="map-card">
-            <MapContainer
-              center={defaultCenter}
-              zoom={12}
-              scrollWheelZoom
-              className="map"
-            >
-              <TileLayer
-                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-              />
-
-              <MapCenter position={selectedPosition} />
-
-              {stations.map((station) => {
-                const position =
-                  STATION_COORDINATES[station.station_id];
-
-                if (!position) {
-                  return null;
-                }
-
-                return (
-                  <Marker
-                    key={station.station_id}
-                    position={position}
-                    icon={stationIcon}
-                    eventHandlers={{
-                      click: () => setSelectedStation(station),
-                    }}
-                  >
-                    <Popup>
-                      <strong>Station {station.station_id}</strong>
-                      <br />
-                      Latest level: {station.latest_value}
-                      <br />
-                      Missing: {station.missing_value_count}
-                    </Popup>
-                  </Marker>
-                );
-              })}
-            </MapContainer>
           </div>
 
-          <div className="chart-card">
-            <div className="chart-heading">
+          {/* =======================================================
+              PCTT HYDROPOWER
+          ======================================================= */}
+          <div className="card pctt-card">
+            <div className="card-header">
+              <h2>PCTT Hydropower</h2>
+
+              <span>Latest observation</span>
+            </div>
+
+            {loadingPctt ? (
+              <p>Loading PCTT data...</p>
+            ) : pcttLatest ? (
+              <>
+                <p className="observation-time">
+                  {new Date(pcttLatest.timestamp).toLocaleString()}
+                </p>
+
+                <div className="pctt-grid">
+                  <div className="metric">
+                    <span>HTL 1</span>
+                    <strong>{pcttLatest.htl1 ?? "N/A"}</strong>
+                  </div>
+
+                  <div className="metric">
+                    <span>Inflow 1</span>
+                    <strong>{pcttLatest.qvao1 ?? "N/A"}</strong>
+                  </div>
+
+                  <div className="metric">
+                    <span>HTL 2</span>
+                    <strong>{pcttLatest.htl2 ?? "N/A"}</strong>
+                  </div>
+
+                  <div className="metric">
+                    <span>Inflow 2</span>
+                    <strong>{pcttLatest.qvao2 ?? "N/A"}</strong>
+                  </div>
+
+                  <div className="metric">
+                    <span>HTL 3</span>
+                    <strong>{pcttLatest.htl3 ?? "N/A"}</strong>
+                  </div>
+
+                  <div className="metric">
+                    <span>Inflow 3</span>
+                    <strong>{pcttLatest.qvao3 ?? "N/A"}</strong>
+                  </div>
+
+                  <div className="metric">
+                    <span>HTL 4</span>
+                    <strong>{pcttLatest.htl4 ?? "N/A"}</strong>
+                  </div>
+
+                  <div className="metric">
+                    <span>Inflow 4</span>
+                    <strong>{pcttLatest.qvao4 ?? "N/A"}</strong>
+                  </div>
+
+                  <div className="metric">
+                    <span>Vu Gia Flow</span>
+                    <strong>{pcttLatest.qvevugia ?? "N/A"}</strong>
+                  </div>
+
+                  <div className="metric">
+                    <span>Thu Bon Flow</span>
+                    <strong>{pcttLatest.qvethubon ?? "N/A"}</strong>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <p>No PCTT data available.</p>
+            )}
+          </div>
+        </section>
+
+        {/* =========================================================
+            WEBGIS MAP
+        ========================================================= */}
+        <section className="card map-card">
+          <div className="card-header">
+            <h2>Hydrology WebGIS</h2>
+
+            <span>Station overview</span>
+          </div>
+
+          <MapContainer
+            center={[16.047, 108.206]}
+            zoom={11}
+            scrollWheelZoom={true}
+            className="map"
+          >
+            <TileLayer
+              attribution='&copy; <a href="https://www.openstreetmap.org/">OpenStreetMap</a>'
+              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            />
+
+            {stations.map((station) => {
+              const coordinates =
+                STATION_COORDINATES[station.station_id];
+
+              if (!coordinates) {
+                return null;
+              }
+
+              return (
+                <CircleMarker
+                  key={station.station_id}
+                  center={coordinates}
+                  radius={9}
+                  pathOptions={{
+                    fillOpacity: 0.8,
+                  }}
+                >
+                  <Popup>
+                    <strong>
+                      Station {station.station_id}
+                    </strong>
+
+                    <br />
+
+                    Latest value:{" "}
+                    {station.latest_value ?? "N/A"}
+
+                    <br />
+
+                    Valid observations:{" "}
+                    {station.valid_observations}
+                  </Popup>
+                </CircleMarker>
+              );
+            })}
+          </MapContainer>
+        </section>
+
+        {/* =========================================================
+            FORECAST
+        ========================================================= */}
+        <section className="bottom-grid">
+          <div className="card forecast-card">
+            <div className="card-header">
               <div>
-                <h2>24-Hour Water-Level Forecast</h2>
+                <h2>24-Hour Forecast</h2>
+
                 {selectedStation && (
-                  <p>
+                  <span>
                     Station {selectedStation.station_id} · Random Forest
-                  </p>
+                  </span>
                 )}
               </div>
 
-              {loadingForecast && (
-                <span className="muted">Generating forecast...</span>
-              )}
+              {loadingForecast && <span>Loading...</span>}
             </div>
 
-            {forecast && chartData.length > 0 ? (
-              <div className="chart">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={chartData}>
+            {forecast && (
+              <div className="forecast-metrics">
+                <div>
+                  <span>MAE</span>
+
+                  <strong>
+                    {forecast.metrics?.mae?.toFixed(4) ?? "N/A"}
+                  </strong>
+                </div>
+
+                <div>
+                  <span>RMSE</span>
+
+                  <strong>
+                    {forecast.metrics?.rmse?.toFixed(4) ?? "N/A"}
+                  </strong>
+                </div>
+
+                <div>
+                  <span>Forecast Points</span>
+
+                  <strong>
+                    {forecast.forecast?.length ?? 0}
+                  </strong>
+                </div>
+              </div>
+            )}
+
+            <div className="chart-container">
+              {loadingForecast ? (
+                <p>Generating forecast...</p>
+              ) : forecastChartData.length > 0 ? (
+                <ResponsiveContainer width="100%" height={320}>
+                  <LineChart data={forecastChartData}>
                     <CartesianGrid strokeDasharray="3 3" />
+
                     <XAxis dataKey="time" />
+
                     <YAxis />
+
                     <Tooltip />
+
+                    <Legend />
+
                     <Line
                       type="monotone"
                       dataKey="value"
-                      strokeWidth={3}
+                      name="Predicted value"
+                      strokeWidth={2}
                       dot={false}
                     />
                   </LineChart>
                 </ResponsiveContainer>
-              </div>
-            ) : (
-              <div className="empty-chart">
-                {loadingForecast
-                  ? "Generating forecast..."
-                  : "Select a station to view its forecast."}
-              </div>
-            )}
+              ) : (
+                <p>No forecast data available.</p>
+              )}
+            </div>
           </div>
         </section>
       </main>
