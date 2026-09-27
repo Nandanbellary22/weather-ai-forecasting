@@ -8,7 +8,12 @@ from psycopg2.extras import execute_values
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
-CSV_PATH = PROJECT_ROOT / "data" / "processed" / "historical_180days_all_stations.csv"
+CSV_PATH = (
+    PROJECT_ROOT
+    / "data"
+    / "processed"
+    / "historical_180days_all_stations.csv"
+)
 
 
 DB_CONFIG = {
@@ -20,8 +25,14 @@ DB_CONFIG = {
 }
 
 
+# The source APIs provide observation timestamps
+# as Vietnam local clock time without timezone information.
+SOURCE_TIMEZONE = "Asia/Ho_Chi_Minh"
+
+
 def load_csv() -> pd.DataFrame:
     print(f"Loading CSV: {CSV_PATH}")
+    print(f"Interpreting source timestamps as: {SOURCE_TIMEZONE}")
 
     df = pd.read_csv(CSV_PATH)
 
@@ -40,13 +51,16 @@ def load_csv() -> pd.DataFrame:
 
     df["station_id"] = df["station_id"].astype(str)
 
+    # The source CSV contains Vietnam local observation times
+    # without timezone information.
+    #
+    # First parse the timestamps as naive datetimes.
+    # Then explicitly localize them to Vietnam time.
+    #
+    # This prevents PostgreSQL from incorrectly interpreting
+    # the source timestamps using the computer/database timezone.
     df["timestamp"] = pd.to_datetime(
         df["timestamp"],
-        errors="coerce",
-    )
-
-    df["value"] = pd.to_numeric(
-        df["value"],
         errors="coerce",
     )
 
@@ -55,13 +69,23 @@ def load_csv() -> pd.DataFrame:
             "CSV contains invalid timestamps."
         )
 
+    df["timestamp"] = df["timestamp"].dt.tz_localize(
+        SOURCE_TIMEZONE
+    )
+
+    df["value"] = pd.to_numeric(
+        df["value"],
+        errors="coerce",
+    )
+
     duplicate_count = df.duplicated(
         subset=["station_id", "timestamp"]
     ).sum()
 
     if duplicate_count:
         raise ValueError(
-            f"CSV contains {duplicate_count} duplicate station/timestamp rows."
+            f"CSV contains {duplicate_count} "
+            "duplicate station/timestamp rows."
         )
 
     df = df.sort_values(
@@ -72,6 +96,13 @@ def load_csv() -> pd.DataFrame:
     print(f"Stations: {df['station_id'].nunique()}")
     print(
         f"Missing values: {df['value'].isna().sum()}"
+    )
+
+    print(
+        "Timestamp range:",
+        df["timestamp"].min(),
+        "to",
+        df["timestamp"].max(),
     )
 
     return df
@@ -148,7 +179,9 @@ def main():
 
     insert_data(df)
 
-    print("Hydrology data ingestion completed successfully.")
+    print(
+        "Hydrology data ingestion completed successfully."
+    )
 
 
 if __name__ == "__main__":
