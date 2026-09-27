@@ -5,11 +5,17 @@ from pydantic import BaseModel
 
 class StationSummary(BaseModel):
     station_id: str
+    station_name: str | None
+    station_type: str | None
+    latitude: float | None
+    longitude: float | None
+    source: str | None
+    is_active: bool
     observations: int
     valid_observations: int
     missing_values: int
-    start_time: datetime
-    end_time: datetime
+    start_time: datetime | None
+    end_time: datetime | None
     latest_value: float | None
 
 

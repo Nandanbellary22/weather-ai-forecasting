@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 
 from backend.schemas import StationSummary
-from ml.services.forecast_service import get_station_summary
+from backend.services.stations_service import get_station_summary
 
 
 router = APIRouter(
@@ -15,7 +15,7 @@ router = APIRouter(
     response_model=list[StationSummary],
 )
 def list_stations() -> list[StationSummary]:
-    """Return all available hydrological stations."""
+    """Return station metadata and observation statistics."""
 
     try:
         return get_station_summary()

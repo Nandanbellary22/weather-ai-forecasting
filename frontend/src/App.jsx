@@ -18,17 +18,9 @@ import {
 import "leaflet/dist/leaflet.css";
 import "./App.css";
 
+
 const API_BASE_URL = "http://127.0.0.1:8000";
 
-// Temporary display coordinates.
-// These are NOT verified real station coordinates.
-const STATION_COORDINATES = {
-  553000: [16.047, 108.206],
-  553100: [16.067, 108.215],
-  553200: [16.078, 108.200],
-  553300: [16.055, 108.190],
-  553400: [16.030, 108.220],
-};
 
 function App() {
   const [stations, setStations] = useState([]);
@@ -42,16 +34,19 @@ function App() {
 
   const [error, setError] = useState(null);
 
+
   useEffect(() => {
     loadStations();
     loadPcttLatest();
   }, []);
+
 
   useEffect(() => {
     if (selectedStation) {
       loadForecast(selectedStation.station_id);
     }
   }, [selectedStation]);
+
 
   async function loadStations() {
     try {
@@ -78,6 +73,7 @@ function App() {
       setLoadingStations(false);
     }
   }
+
 
   async function loadForecast(stationId) {
     try {
@@ -108,6 +104,7 @@ function App() {
     }
   }
 
+
   async function loadPcttLatest() {
     try {
       setLoadingPctt(true);
@@ -132,7 +129,7 @@ function App() {
     }
   }
 
-  // Backend returns "forecast", not "forecasts".
+
   const forecastChartData =
     forecast?.forecast?.map((item) => ({
       time: new Date(item.timestamp).toLocaleTimeString([], {
@@ -142,8 +139,22 @@ function App() {
       value: item.value,
     })) ?? [];
 
+
+  const stationsWithCoordinates = stations.filter(
+    (station) =>
+      station.latitude !== null &&
+      station.longitude !== null &&
+      Number.isFinite(Number(station.latitude)) &&
+      Number.isFinite(Number(station.longitude))
+  );
+
+
   return (
     <div className="app">
+
+      {/* =========================================================
+          HEADER
+      ========================================================= */}
       <header className="header">
         <div>
           <h1>Hydrometeorological AI Forecasting</h1>
@@ -159,17 +170,29 @@ function App() {
         </div>
       </header>
 
-      {error && <div className="error-banner">{error}</div>}
+
+      {/* =========================================================
+          ERROR MESSAGE
+      ========================================================= */}
+      {error && (
+        <div className="error-banner">
+          {error}
+        </div>
+      )}
+
 
       <main className="dashboard">
+
         {/* =========================================================
             TOP SECTION
         ========================================================= */}
         <section className="top-grid">
+
           {/* =======================================================
               HYDROLOGY STATIONS
           ======================================================= */}
           <div className="card station-card">
+
             <div className="card-header">
               <h2>Hydrology Stations</h2>
 
@@ -180,12 +203,16 @@ function App() {
               </span>
             </div>
 
+
             {loadingStations ? (
               <p>Loading stations...</p>
+
             ) : stations.length === 0 ? (
               <p>No stations available.</p>
+
             ) : (
               <div className="station-list">
+
                 {stations.map((station) => (
                   <button
                     key={station.station_id}
@@ -196,8 +223,11 @@ function App() {
                     }`}
                     onClick={() => setSelectedStation(station)}
                   >
+
                     <div>
-                      <strong>Station {station.station_id}</strong>
+                      <strong>
+                        Station {station.station_id}
+                      </strong>
 
                       <span>
                         {station.valid_observations} valid observations
@@ -207,116 +237,167 @@ function App() {
                     <div className="station-value">
                       {station.latest_value ?? "N/A"}
                     </div>
+
                   </button>
                 ))}
+
               </div>
             )}
+
           </div>
+
 
           {/* =======================================================
               PCTT HYDROPOWER
           ======================================================= */}
           <div className="card pctt-card">
+
             <div className="card-header">
               <h2>PCTT Hydropower</h2>
 
-              <span>Latest observation</span>
+              <span>
+                Latest observation
+              </span>
             </div>
+
 
             {loadingPctt ? (
               <p>Loading PCTT data...</p>
+
             ) : pcttLatest ? (
+
               <>
                 <p className="observation-time">
-                  {new Date(pcttLatest.timestamp).toLocaleString()}
+                  {new Date(
+                    pcttLatest.timestamp
+                  ).toLocaleString()}
                 </p>
 
+
                 <div className="pctt-grid">
+
                   <div className="metric">
                     <span>HTL 1</span>
-                    <strong>{pcttLatest.htl1 ?? "N/A"}</strong>
+                    <strong>
+                      {pcttLatest.htl1 ?? "N/A"}
+                    </strong>
                   </div>
 
                   <div className="metric">
                     <span>Inflow 1</span>
-                    <strong>{pcttLatest.qvao1 ?? "N/A"}</strong>
+                    <strong>
+                      {pcttLatest.qvao1 ?? "N/A"}
+                    </strong>
                   </div>
 
                   <div className="metric">
                     <span>HTL 2</span>
-                    <strong>{pcttLatest.htl2 ?? "N/A"}</strong>
+                    <strong>
+                      {pcttLatest.htl2 ?? "N/A"}
+                    </strong>
                   </div>
 
                   <div className="metric">
                     <span>Inflow 2</span>
-                    <strong>{pcttLatest.qvao2 ?? "N/A"}</strong>
+                    <strong>
+                      {pcttLatest.qvao2 ?? "N/A"}
+                    </strong>
                   </div>
 
                   <div className="metric">
                     <span>HTL 3</span>
-                    <strong>{pcttLatest.htl3 ?? "N/A"}</strong>
+                    <strong>
+                      {pcttLatest.htl3 ?? "N/A"}
+                    </strong>
                   </div>
 
                   <div className="metric">
                     <span>Inflow 3</span>
-                    <strong>{pcttLatest.qvao3 ?? "N/A"}</strong>
+                    <strong>
+                      {pcttLatest.qvao3 ?? "N/A"}
+                    </strong>
                   </div>
 
                   <div className="metric">
                     <span>HTL 4</span>
-                    <strong>{pcttLatest.htl4 ?? "N/A"}</strong>
+                    <strong>
+                      {pcttLatest.htl4 ?? "N/A"}
+                    </strong>
                   </div>
 
                   <div className="metric">
                     <span>Inflow 4</span>
-                    <strong>{pcttLatest.qvao4 ?? "N/A"}</strong>
+                    <strong>
+                      {pcttLatest.qvao4 ?? "N/A"}
+                    </strong>
                   </div>
 
                   <div className="metric">
                     <span>Vu Gia Flow</span>
-                    <strong>{pcttLatest.qvevugia ?? "N/A"}</strong>
+                    <strong>
+                      {pcttLatest.qvevugia ?? "N/A"}
+                    </strong>
                   </div>
 
                   <div className="metric">
                     <span>Thu Bon Flow</span>
-                    <strong>{pcttLatest.qvethubon ?? "N/A"}</strong>
+                    <strong>
+                      {pcttLatest.qvethubon ?? "N/A"}
+                    </strong>
                   </div>
+
                 </div>
               </>
+
             ) : (
               <p>No PCTT data available.</p>
             )}
+
           </div>
+
         </section>
+
 
         {/* =========================================================
             WEBGIS MAP
         ========================================================= */}
         <section className="card map-card">
-          <div className="card-header">
-            <h2>Hydrology WebGIS</h2>
 
-            <span>Station overview</span>
+          <div className="card-header">
+            <div>
+              <h2>Hydrology WebGIS</h2>
+
+              <span>
+                Database-driven station locations
+              </span>
+            </div>
+
+            <span>
+              {stationsWithCoordinates.length} mapped
+            </span>
           </div>
 
+
           <MapContainer
-            center={[16.047, 108.206]}
-            zoom={11}
+            center={[16.0, 108.0]}
+            zoom={7}
             scrollWheelZoom={true}
             className="map"
           >
+
             <TileLayer
               attribution='&copy; <a href="https://www.openstreetmap.org/">OpenStreetMap</a>'
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             />
 
-            {stations.map((station) => {
-              const coordinates =
-                STATION_COORDINATES[station.station_id];
 
-              if (!coordinates) {
-                return null;
-              }
+            {stationsWithCoordinates.map((station) => {
+
+              const coordinates = [
+                Number(station.latitude),
+                Number(station.longitude),
+              ];
+
 
               return (
                 <CircleMarker
@@ -327,10 +408,17 @@ function App() {
                     fillOpacity: 0.8,
                   }}
                 >
+
                   <Popup>
+
                     <strong>
                       Station {station.station_id}
                     </strong>
+
+                    <br />
+
+                    Type:{" "}
+                    {station.station_type ?? "N/A"}
 
                     <br />
 
@@ -341,20 +429,37 @@ function App() {
 
                     Valid observations:{" "}
                     {station.valid_observations}
+
                   </Popup>
+
                 </CircleMarker>
               );
             })}
+
           </MapContainer>
+
+
+          {stationsWithCoordinates.length === 0 && (
+            <p className="observation-time">
+              Station coordinates have not been verified and stored yet.
+              The map is therefore showing no station markers.
+            </p>
+          )}
+
         </section>
+
 
         {/* =========================================================
             FORECAST
         ========================================================= */}
         <section className="bottom-grid">
+
           <div className="card forecast-card">
+
             <div className="card-header">
+
               <div>
+
                 <h2>24-Hour Forecast</h2>
 
                 {selectedStation && (
@@ -362,13 +467,21 @@ function App() {
                     Station {selectedStation.station_id} · Random Forest
                   </span>
                 )}
+
               </div>
 
-              {loadingForecast && <span>Loading...</span>}
+
+              {loadingForecast && (
+                <span>Loading...</span>
+              )}
+
             </div>
 
+
             {forecast && (
+
               <div className="forecast-metrics">
+
                 <div>
                   <span>MAE</span>
 
@@ -376,6 +489,7 @@ function App() {
                     {forecast.metrics?.mae?.toFixed(4) ?? "N/A"}
                   </strong>
                 </div>
+
 
                 <div>
                   <span>RMSE</span>
@@ -385,6 +499,7 @@ function App() {
                   </strong>
                 </div>
 
+
                 <div>
                   <span>Forecast Points</span>
 
@@ -392,18 +507,38 @@ function App() {
                     {forecast.forecast?.length ?? 0}
                   </strong>
                 </div>
+
               </div>
+
             )}
 
-            <div className="chart-container">
-              {loadingForecast ? (
-                <p>Generating forecast...</p>
-              ) : forecastChartData.length > 0 ? (
-                <ResponsiveContainer width="100%" height={320}>
-                  <LineChart data={forecastChartData}>
-                    <CartesianGrid strokeDasharray="3 3" />
 
-                    <XAxis dataKey="time" />
+            <div className="chart-container">
+
+              {loadingForecast ? (
+
+                <p>
+                  Generating forecast...
+                </p>
+
+              ) : forecastChartData.length > 0 ? (
+
+                <ResponsiveContainer
+                  width="100%"
+                  height={320}
+                >
+
+                  <LineChart
+                    data={forecastChartData}
+                  >
+
+                    <CartesianGrid
+                      strokeDasharray="3 3"
+                    />
+
+                    <XAxis
+                      dataKey="time"
+                    />
 
                     <YAxis />
 
@@ -418,17 +553,30 @@ function App() {
                       strokeWidth={2}
                       dot={false}
                     />
+
                   </LineChart>
+
                 </ResponsiveContainer>
+
               ) : (
-                <p>No forecast data available.</p>
+
+                <p>
+                  No forecast data available.
+                </p>
+
               )}
+
             </div>
+
           </div>
+
         </section>
+
       </main>
+
     </div>
   );
 }
+
 
 export default App;
