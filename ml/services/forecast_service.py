@@ -11,6 +11,7 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
+SOURCE_TIMEZONE = "Asia/Ho_Chi_Minh"
 
 DB_CONFIG = {
     "host": "localhost",
@@ -21,6 +22,8 @@ DB_CONFIG = {
 
 
 def get_connection():
+    """Create a PostgreSQL connection."""
+
     password = os.getenv("POSTGRES_PASSWORD")
 
     if not password:
@@ -40,6 +43,11 @@ def get_connection():
 def load_data() -> pd.DataFrame:
     """
     Load hydrology observations directly from PostgreSQL.
+
+    PostgreSQL stores timestamps as timestamptz.
+    The source observations originate from Vietnam, so timestamps
+    are explicitly converted to Asia/Ho_Chi_Minh before any
+    temporal features are created.
     """
 
     query = """
@@ -81,6 +89,17 @@ def load_data() -> pd.DataFrame:
     df["timestamp"] = pd.to_datetime(
         df["timestamp"],
         errors="coerce",
+        utc=True,
+    )
+
+    if df["timestamp"].isna().any():
+        raise ValueError(
+            "Database contains invalid timestamps."
+        )
+
+    # Convert database instants explicitly to Vietnam local time.
+    df["timestamp"] = df["timestamp"].dt.tz_convert(
+        SOURCE_TIMEZONE
     )
 
     df["value"] = pd.to_numeric(
@@ -98,9 +117,28 @@ def load_data() -> pd.DataFrame:
 def create_features(df: pd.DataFrame) -> pd.DataFrame:
     """
     Create temporal and lag features.
+
+    Timestamp features are based on Vietnam local time.
     """
 
     data = df.copy()
+
+    if data.empty:
+        return data
+
+    data["timestamp"] = pd.to_datetime(
+        data["timestamp"],
+        errors="coerce",
+    )
+
+    if data["timestamp"].dt.tz is None:
+        data["timestamp"] = data["timestamp"].dt.tz_localize(
+            SOURCE_TIMEZONE
+        )
+    else:
+        data["timestamp"] = data["timestamp"].dt.tz_convert(
+            SOURCE_TIMEZONE
+        )
 
     data["hour"] = data["timestamp"].dt.hour
     data["day_of_week"] = data["timestamp"].dt.dayofweek
@@ -250,6 +288,7 @@ def forecast_next_24_hours(
     """
     Train a model and recursively forecast the next 24 hours.
 
+    Forecast timestamps are maintained in Vietnam local time.
     The forecast is also saved into PostgreSQL.
     """
 
@@ -299,9 +338,11 @@ def forecast_next_24_hours(
         )
 
         current_hour = forecast_timestamp.hour
+
         current_day_of_week = (
             forecast_timestamp.dayofweek
         )
+
         current_day_of_month = (
             forecast_timestamp.day
         )

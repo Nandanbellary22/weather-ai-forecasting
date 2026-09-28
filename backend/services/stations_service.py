@@ -1,11 +1,13 @@
 import os
 
 import psycopg2
+from zoneinfo import ZoneInfo
+
+
+SOURCE_TIMEZONE = ZoneInfo("Asia/Ho_Chi_Minh")
 
 
 def get_connection():
-    """Create a PostgreSQL connection."""
-
     return psycopg2.connect(
         host="localhost",
         database="weather_forecasting",
@@ -14,14 +16,14 @@ def get_connection():
     )
 
 
+def convert_to_vietnam_time(timestamp):
+    if timestamp is None:
+        return None
+
+    return timestamp.astimezone(SOURCE_TIMEZONE)
+
+
 def get_station_summary():
-    """
-    Return station metadata together with observation statistics.
-
-    Station metadata comes from the stations table.
-    Observation statistics come from hydrology_observations.
-    """
-
     query = """
         SELECT
             s.station_id,
@@ -113,8 +115,8 @@ def get_station_summary():
                     "observations": int(observations),
                     "valid_observations": int(valid_observations),
                     "missing_values": int(missing_values),
-                    "start_time": start_time,
-                    "end_time": end_time,
+                    "start_time": convert_to_vietnam_time(start_time),
+                    "end_time": convert_to_vietnam_time(end_time),
                     "latest_value": latest_value,
                 }
             )
