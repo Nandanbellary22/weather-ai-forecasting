@@ -22,3 +22,5 @@ data/processed/
 # OS
 .DS_Store
 Thumbs.dbmodels/
+
+models/
