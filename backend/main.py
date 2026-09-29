@@ -1,7 +1,13 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.routes import forecasts, pctt, stations
+from backend.routes import (
+    forecasts,
+    pctt,
+    rainfall,
+    stations,
+    weather,
+)
 
 
 app = FastAPI(
@@ -25,6 +31,8 @@ app.add_middleware(
 app.include_router(stations.router)
 app.include_router(forecasts.router)
 app.include_router(pctt.router)
+app.include_router(weather.router)
+app.include_router(rainfall.router)
 
 
 @app.get("/")
@@ -38,5 +46,5 @@ def root():
 @app.get("/health")
 def health():
     return {
-        "status": "ok",
+        "status": "ok"
     }
