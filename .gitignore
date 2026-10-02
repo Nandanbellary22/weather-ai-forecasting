@@ -24,3 +24,9 @@ data/processed/
 Thumbs.dbmodels/
 
 models/
+
+# Temporary VNDMS reverse-engineering files
+vndms_*.js
+vndms_*.html
+vndms_decoded_strings.txt
+decode_vndms.py
