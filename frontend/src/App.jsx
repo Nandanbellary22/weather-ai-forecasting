@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+
 import {
-  MapContainer,
-  TileLayer,
   CircleMarker,
+  MapContainer,
   Popup,
+  TileLayer,
   useMap,
 } from "react-leaflet";
 
@@ -25,7 +26,12 @@ const WEATHER_LOCATIONS = [
   { code: "DL", name: "Da Lat", latitude: 11.9404, longitude: 108.4583 },
   { code: "BMT", name: "Buon Ma Thuot", latitude: 12.6667, longitude: 108.0382 },
   { code: "PLEIKU", name: "Pleiku", latitude: 13.9833, longitude: 108.0 },
-  { code: "HCM", name: "Ho Chi Minh City", latitude: 10.8231, longitude: 106.6297 },
+  {
+    code: "HCM",
+    name: "Ho Chi Minh City",
+    latitude: 10.8231,
+    longitude: 106.6297,
+  },
   { code: "CT", name: "Can Tho", latitude: 10.0452, longitude: 105.7469 },
 ];
 
@@ -86,13 +92,17 @@ const HYDRO_FIELDS = {
 function MapCenter({ location }) {
   const map = useMap();
 
-  if (location) {
+  useEffect(() => {
+    if (!location) {
+      return;
+    }
+
     map.setView(
       [location.latitude, location.longitude],
       8,
       { animate: true }
     );
-  }
+  }, [location, map]);
 
   return null;
 }
@@ -100,25 +110,38 @@ function MapCenter({ location }) {
 function App() {
   const [mode, setMode] = useState("weather");
 
+  // Weather
   const [selectedLocation, setSelectedLocation] = useState(null);
-
   const [temperature, setTemperature] = useState(null);
   const [rainfall, setRainfall] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
 
+  // PCTT reservoirs
   const [hydrology, setHydrology] = useState(null);
   const [selectedReservoir, setSelectedReservoir] = useState(null);
-
-  const [loading, setLoading] = useState(false);
   const [hydroLoading, setHydroLoading] = useState(false);
-
-  const [error, setError] = useState(null);
   const [hydroError, setHydroError] = useState(null);
+
+  // Hydrology stations
+  const [stations, setStations] = useState([]);
+  const [stationsLoading, setStationsLoading] = useState(false);
+  const [stationsError, setStationsError] = useState(null);
+
+  const [selectedStation, setSelectedStation] = useState(null);
+  const [stationHistory, setStationHistory] = useState([]);
+  const [stationHistoryLoading, setStationHistoryLoading] = useState(false);
+  const [stationHistoryError, setStationHistoryError] = useState(null);
 
   async function loadWeather(location) {
     setSelectedLocation(location);
+    setSelectedReservoir(null);
+    setSelectedStation(null);
+
     setTemperature(null);
     setRainfall(null);
     setError(null);
+
     setLoading(true);
 
     try {
@@ -141,16 +164,19 @@ function App() {
         );
       }
 
-      const temperatureData =
-        await temperatureResponse.json();
-
-      const rainfallData =
-        await rainfallResponse.json();
+      const [temperatureData, rainfallData] =
+        await Promise.all([
+          temperatureResponse.json(),
+          rainfallResponse.json(),
+        ]);
 
       setTemperature(temperatureData);
       setRainfall(rainfallData);
     } catch (err) {
-      setError(err.message);
+      setError(
+        err.message ||
+          "Unable to load weather forecast."
+      );
     } finally {
       setLoading(false);
     }
@@ -158,6 +184,11 @@ function App() {
 
   async function loadHydrology(reservoir) {
     setSelectedReservoir(reservoir);
+    setSelectedStation(null);
+
+    setStationHistory([]);
+    setStationHistoryError(null);
+
     setHydrology(null);
     setHydroError(null);
     setHydroLoading(true);
@@ -177,9 +208,91 @@ function App() {
 
       setHydrology(data);
     } catch (err) {
-      setHydroError(err.message);
+      setHydroError(
+        err.message ||
+          "Unable to load hydrological data."
+      );
     } finally {
       setHydroLoading(false);
+    }
+  }
+
+  async function loadStations() {
+    setStationsLoading(true);
+    setStationsError(null);
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/stations`
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          "Unable to load hydrology stations."
+        );
+      }
+
+      const data = await response.json();
+
+      setStations(
+        Array.isArray(data)
+          ? data
+          : []
+      );
+    } catch (err) {
+      setStationsError(
+        err.message ||
+          "Unable to load hydrology stations."
+      );
+    } finally {
+      setStationsLoading(false);
+    }
+  }
+
+  async function loadStationHistory(station) {
+    setSelectedStation(station);
+    setSelectedReservoir(null);
+
+    setStationHistory([]);
+    setStationHistoryError(null);
+    setStationHistoryLoading(true);
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/stations/${station.station_id}/history?limit=24`
+      );
+
+      if (!response.ok) {
+        let message =
+          `Unable to load history for station ${station.station_id}.`;
+
+        try {
+          const data = await response.json();
+
+          if (data?.detail) {
+            message = data.detail;
+          }
+        } catch {
+          // Keep default message.
+        }
+
+        throw new Error(message);
+      }
+
+      const data = await response.json();
+
+      setStationHistory(
+        Array.isArray(data)
+          ? data
+          : []
+      );
+    } catch (err) {
+      setStationHistoryError(
+        err.message ||
+          "Unable to load station history."
+      );
+    } finally {
+      setStationHistoryLoading(false);
     }
   }
 
@@ -188,27 +301,70 @@ function App() {
 
     setSelectedLocation(null);
     setSelectedReservoir(null);
+    setSelectedStation(null);
 
     setTemperature(null);
     setRainfall(null);
     setHydrology(null);
+    setStationHistory([]);
 
     setError(null);
     setHydroError(null);
+    setStationsError(null);
+    setStationHistoryError(null);
+
+    if (
+      newMode === "hydrology" &&
+      stations.length === 0
+    ) {
+      loadStations();
+    }
   }
 
-  function getHydroValue(reservoirId, field) {
+  function getHydroValue(
+    reservoirId,
+    field
+  ) {
     if (!hydrology) {
       return null;
     }
 
-    const fields = HYDRO_FIELDS[reservoirId];
+    const fields =
+      HYDRO_FIELDS[reservoirId];
 
     if (!fields) {
       return null;
     }
 
-    return hydrology[fields[field]];
+    return hydrology[
+      fields[field]
+    ];
+  }
+
+  function formatValue(
+    value,
+    digits = 2
+  ) {
+    if (
+      value === null ||
+      value === undefined ||
+      value === ""
+    ) {
+      return "—";
+    }
+
+    const numericValue =
+      Number(value);
+
+    if (
+      !Number.isFinite(numericValue)
+    ) {
+      return "—";
+    }
+
+    return numericValue.toFixed(
+      digits
+    );
   }
 
   return (
@@ -224,7 +380,7 @@ function App() {
 
           <p>
             Multi-source data • Machine Learning •
-            Weather & Hydrology
+            Weather &amp; Hydrology
           </p>
         </div>
 
@@ -284,94 +440,110 @@ function App() {
               )}
 
             {mode === "weather" &&
-              WEATHER_LOCATIONS.map((location) => (
-                <CircleMarker
-                  key={location.code}
-                  center={[
-                    location.latitude,
-                    location.longitude,
-                  ]}
-                  radius={
-                    selectedLocation?.code ===
-                    location.code
-                      ? 10
-                      : 7
-                  }
-                  pathOptions={{
-                    color:
+              WEATHER_LOCATIONS.map(
+                (location) => (
+                  <CircleMarker
+                    key={location.code}
+                    center={[
+                      location.latitude,
+                      location.longitude,
+                    ]}
+                    radius={
                       selectedLocation?.code ===
                       location.code
-                        ? "#dc2626"
-                        : "#2563eb",
+                        ? 10
+                        : 7
+                    }
+                    pathOptions={{
+                      color:
+                        selectedLocation?.code ===
+                        location.code
+                          ? "#dc2626"
+                          : "#2563eb",
 
-                    fillColor:
-                      selectedLocation?.code ===
-                      location.code
-                        ? "#ef4444"
-                        : "#3b82f6",
+                      fillColor:
+                        selectedLocation?.code ===
+                        location.code
+                          ? "#ef4444"
+                          : "#3b82f6",
 
-                    fillOpacity: 0.85,
-                    weight: 2,
-                  }}
-                  eventHandlers={{
-                    click: () =>
-                      loadWeather(location),
-                  }}
-                >
-                  <Popup>
-                    <strong>
-                      {location.name}
-                    </strong>
-                    <br />
-                    Click for ML forecast.
-                  </Popup>
-                </CircleMarker>
-              ))}
+                      fillOpacity: 0.85,
+                      weight: 2,
+                    }}
+                    eventHandlers={{
+                      click: () =>
+                        loadWeather(
+                          location
+                        ),
+                    }}
+                  >
+
+                    <Popup>
+                      <strong>
+                        {location.name}
+                      </strong>
+
+                      <br />
+
+                      Click for ML forecast.
+                    </Popup>
+
+                  </CircleMarker>
+                )
+              )}
 
             {mode === "hydrology" &&
-              RESERVOIRS.map((reservoir) => (
-                <CircleMarker
-                  key={reservoir.id}
-                  center={[
-                    reservoir.latitude,
-                    reservoir.longitude,
-                  ]}
-                  radius={
-                    selectedReservoir?.id ===
-                    reservoir.id
-                      ? 12
-                      : 9
-                  }
-                  pathOptions={{
-                    color:
+              RESERVOIRS.map(
+                (reservoir) => (
+                  <CircleMarker
+                    key={reservoir.id}
+                    center={[
+                      reservoir.latitude,
+                      reservoir.longitude,
+                    ]}
+                    radius={
                       selectedReservoir?.id ===
                       reservoir.id
-                        ? "#065f46"
-                        : "#047857",
+                        ? 12
+                        : 9
+                    }
+                    pathOptions={{
+                      color:
+                        selectedReservoir?.id ===
+                        reservoir.id
+                          ? "#065f46"
+                          : "#047857",
 
-                    fillColor:
-                      selectedReservoir?.id ===
-                      reservoir.id
-                        ? "#059669"
-                        : "#10b981",
+                      fillColor:
+                        selectedReservoir?.id ===
+                        reservoir.id
+                          ? "#059669"
+                          : "#10b981",
 
-                    fillOpacity: 0.9,
-                    weight: 2,
-                  }}
-                  eventHandlers={{
-                    click: () =>
-                      loadHydrology(reservoir),
-                  }}
-                >
-                  <Popup>
-                    <strong>
-                      {reservoir.name}
-                    </strong>
-                    <br />
-                    Click for hydrological data.
-                  </Popup>
-                </CircleMarker>
-              ))}
+                      fillOpacity: 0.9,
+                      weight: 2,
+                    }}
+                    eventHandlers={{
+                      click: () =>
+                        loadHydrology(
+                          reservoir
+                        ),
+                    }}
+                  >
+
+                    <Popup>
+                      <strong>
+                        {reservoir.name}
+                      </strong>
+
+                      <br />
+
+                      Click for hydrological data.
+                    </Popup>
+
+                  </CircleMarker>
+                )
+              )}
 
           </MapContainer>
 
@@ -411,14 +583,16 @@ function App() {
 
           </div>
 
-          {!selectedLocation &&
-            !selectedReservoir && (
+          {/* ========================= */}
+          {/* WEATHER MODE               */}
+          {/* ========================= */}
+
+          {mode === "weather" &&
+            !selectedLocation && (
               <div className="empty-state">
 
                 <div className="big-icon">
-                  {mode === "weather"
-                    ? "☁"
-                    : "💧"}
+                  ☁
                 </div>
 
                 <h3>
@@ -426,9 +600,8 @@ function App() {
                 </h3>
 
                 <p>
-                  {mode === "weather"
-                    ? "Click a blue marker to view the machine-learning forecast."
-                    : "Click a green reservoir to view real hydrological observations."}
+                  Click a blue marker to view
+                  the machine-learning forecast.
                 </p>
 
               </div>
@@ -472,6 +645,7 @@ function App() {
                   !error &&
                   temperature &&
                   rainfall && (
+
                     <div className="forecast-content">
 
                       <div className="forecast-card">
@@ -543,11 +717,14 @@ function App() {
                       </div>
 
                       <div className="timestamp">
+
                         Data timestamp:
                         <br />
+
                         {new Date(
                           temperature.timestamp
                         ).toLocaleString()}
+
                       </div>
 
                     </div>
@@ -556,180 +733,521 @@ function App() {
               </div>
             )}
 
-          {mode === "hydrology" &&
-            selectedReservoir && (
-              <div>
+          {/* ========================= */}
+          {/* HYDROLOGY MODE             */}
+          {/* ========================= */}
+
+          {mode === "hydrology" && (
+            <div>
+
+              {/* Station registry */}
+
+              <div
+                className="hydro-section"
+                style={{
+                  marginBottom: "20px",
+                }}
+              >
 
                 <div className="location-header">
 
                   <span>
-                    Selected reservoir
+                    Confirmed hydrology network
                   </span>
 
                   <h2>
-                    {selectedReservoir.name}
+                    {stations.length || 28} stations
                   </h2>
 
                   <p>
-                    Central Vietnam
+                    Station registry from
+                    PostgreSQL + FastAPI.
+                    Coordinates are shown only
+                    when reliable metadata is available.
                   </p>
 
                 </div>
 
-                {hydroLoading && (
+                {stationsLoading && (
                   <div className="loading">
-                    Loading hydrological observations...
+                    Loading hydrology stations...
                   </div>
                 )}
 
-                {hydroError && (
+                {stationsError && (
                   <div className="error">
-                    {hydroError}
+                    {stationsError}
                   </div>
                 )}
 
-                {!hydroLoading &&
-                  !hydroError &&
-                  hydrology && (
-                    <div className="forecast-content">
+                {!stationsLoading &&
+                  !stationsError &&
+                  stations.length > 0 && (
 
-                      <div className="hydro-timestamp">
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns:
+                          "repeat(2, minmax(0, 1fr))",
+                        gap: "8px",
+                        maxHeight: "250px",
+                        overflowY: "auto",
+                        paddingRight: "4px",
+                      }}
+                    >
 
-                        <span>
-                          Latest observation
-                        </span>
+                      {stations.map(
+                        (station) => {
 
-                        <strong>
-                          {new Date(
-                            hydrology.timestamp
-                          ).toLocaleString()}
-                        </strong>
+                          const isSelected =
+                            selectedStation?.station_id ===
+                            station.station_id;
 
-                      </div>
+                          return (
+                            <button
+                              key={
+                                station.station_id
+                              }
+                              type="button"
+                              onClick={() =>
+                                loadStationHistory(
+                                  station
+                                )
+                              }
+                              style={{
+                                textAlign: "left",
+                                border: isSelected
+                                  ? "2px solid #047857"
+                                  : "1px solid #d1d5db",
+                                borderRadius: "10px",
+                                padding: "9px 10px",
+                                background:
+                                  isSelected
+                                    ? "#ecfdf5"
+                                    : "white",
+                                cursor: "pointer",
+                              }}
+                            >
 
-                      <div className="hydro-card">
+                              <strong>
+                                Station{" "}
+                                {
+                                  station.station_id
+                                }
+                              </strong>
 
-                        <span>
-                          Reservoir water level
-                        </span>
+                              <div
+                                style={{
+                                  fontSize: "12px",
+                                  marginTop: "4px",
+                                }}
+                              >
+                                {
+                                  station.observations
+                                }{" "}
+                                observations
+                              </div>
 
-                        <strong>
-                          {
-                            getHydroValue(
-                              selectedReservoir.id,
-                              "htl"
-                            )
-                          }
-                        </strong>
+                              <div
+                                style={{
+                                  fontSize: "12px",
+                                  marginTop: "2px",
+                                }}
+                              >
+                                Latest:{" "}
+                                {formatValue(
+                                  station.latest_value
+                                )}
+                              </div>
 
-                        <p>
-                          Htl — water level
-                        </p>
-
-                      </div>
-
-                      <div className="hydro-card">
-
-                        <span>
-                          Inflow
-                        </span>
-
-                        <strong>
-                          {
-                            getHydroValue(
-                              selectedReservoir.id,
-                              "qvao"
-                            )
-                          }
-                        </strong>
-
-                        <p>
-                          Qvao — inflow
-                        </p>
-
-                      </div>
-
-                      <div className="hydro-card">
-
-                        <span>
-                          Powerhouse discharge
-                        </span>
-
-                        <strong>
-                          {
-                            getHydroValue(
-                              selectedReservoir.id,
-                              "power"
-                            )
-                          }
-                        </strong>
-
-                        <p>
-                          Powerhouse flow
-                        </p>
-
-                      </div>
-
-                      <div className="hydro-card">
-
-                        <span>
-                          Spillway discharge
-                        </span>
-
-                        <strong>
-                          {
-                            getHydroValue(
-                              selectedReservoir.id,
-                              "spill"
-                            )
-                          }
-                        </strong>
-
-                        <p>
-                          Qxa qua cua — spillway flow
-                        </p>
-
-                      </div>
-
-                      <div className="hydro-info">
-
-                        <div>
-                          <span>
-                            Data source
-                          </span>
-
-                          <strong>
-                            PCTT Da Nang
-                          </strong>
-                        </div>
-
-                        <div>
-                          <span>
-                            Backend
-                          </span>
-
-                          <strong>
-                            PostgreSQL + FastAPI
-                          </strong>
-                        </div>
-
-                        <div>
-                          <span>
-                            Visualization
-                          </span>
-
-                          <strong>
-                            React + Leaflet WebGIS
-                          </strong>
-                        </div>
-
-                      </div>
+                            </button>
+                          );
+                        }
+                      )}
 
                     </div>
                   )}
 
               </div>
-            )}
+
+              {/* Selected station */}
+
+              {selectedStation && (
+                <div
+                  className="forecast-content"
+                  style={{
+                    marginBottom: "20px",
+                  }}
+                >
+
+                  <div className="location-header">
+
+                    <span>
+                      Selected hydrology station
+                    </span>
+
+                    <h2>
+                      {
+                        selectedStation.station_id
+                      }
+                    </h2>
+
+                    <p>
+                      {selectedStation.station_name ||
+                        "Metadata name unavailable"}
+                    </p>
+
+                  </div>
+
+                  {stationHistoryLoading && (
+                    <div className="loading">
+                      Loading recent observations...
+                    </div>
+                  )}
+
+                  {stationHistoryError && (
+                    <div className="error">
+                      {stationHistoryError}
+                    </div>
+                  )}
+
+                  {!stationHistoryLoading &&
+                    !stationHistoryError &&
+                    stationHistory.length > 0 && (
+                      <>
+
+                        <div className="hydro-card">
+
+                          <span>
+                            Latest station value
+                          </span>
+
+                          <strong>
+                            {formatValue(
+                              stationHistory[
+                                stationHistory.length - 1
+                              ]?.value
+                            )}
+                          </strong>
+
+                          <p>
+                            {new Date(
+                              stationHistory[
+                                stationHistory.length - 1
+                              ]?.timestamp
+                            ).toLocaleString()}
+                          </p>
+
+                        </div>
+
+                        <div
+                          style={{
+                            maxHeight: "280px",
+                            overflowY: "auto",
+                            marginTop: "12px",
+                          }}
+                        >
+
+                          <table
+                            style={{
+                              width: "100%",
+                              borderCollapse:
+                                "collapse",
+                              fontSize: "12px",
+                            }}
+                          >
+
+                            <thead>
+
+                              <tr>
+
+                                <th
+                                  style={{
+                                    textAlign:
+                                      "left",
+                                    padding:
+                                      "7px",
+                                    borderBottom:
+                                      "1px solid #d1d5db",
+                                  }}
+                                >
+                                  Timestamp
+                                </th>
+
+                                <th
+                                  style={{
+                                    textAlign:
+                                      "right",
+                                    padding:
+                                      "7px",
+                                    borderBottom:
+                                      "1px solid #d1d5db",
+                                  }}
+                                >
+                                  Value
+                                </th>
+
+                              </tr>
+
+                            </thead>
+
+                            <tbody>
+
+                              {stationHistory.map(
+                                (observation) => (
+
+                                  <tr
+                                    key={`${observation.station_id}-${observation.timestamp}`}
+                                  >
+
+                                    <td
+                                      style={{
+                                        padding:
+                                          "7px",
+                                        borderBottom:
+                                          "1px solid #f1f5f9",
+                                      }}
+                                    >
+                                      {new Date(
+                                        observation.timestamp
+                                      ).toLocaleString()}
+                                    </td>
+
+                                    <td
+                                      style={{
+                                        padding:
+                                          "7px",
+                                        textAlign:
+                                          "right",
+                                        borderBottom:
+                                          "1px solid #f1f5f9",
+                                      }}
+                                    >
+                                      {formatValue(
+                                        observation.value
+                                      )}
+                                    </td>
+
+                                  </tr>
+
+                                )
+                              )}
+
+                            </tbody>
+
+                          </table>
+
+                        </div>
+
+                      </>
+                    )}
+
+                </div>
+              )}
+
+              {/* Existing PCTT reservoir panel */}
+
+              {selectedReservoir && (
+                <div>
+
+                  <div className="location-header">
+
+                    <span>
+                      Selected reservoir
+                    </span>
+
+                    <h2>
+                      {selectedReservoir.name}
+                    </h2>
+
+                    <p>
+                      Central Vietnam
+                    </p>
+
+                  </div>
+
+                  {hydroLoading && (
+                    <div className="loading">
+                      Loading hydrological observations...
+                    </div>
+                  )}
+
+                  {hydroError && (
+                    <div className="error">
+                      {hydroError}
+                    </div>
+                  )}
+
+                  {!hydroLoading &&
+                    !hydroError &&
+                    hydrology && (
+
+                      <div className="forecast-content">
+
+                        <div className="hydro-timestamp">
+
+                          <span>
+                            Latest observation
+                          </span>
+
+                          <strong>
+                            {new Date(
+                              hydrology.timestamp
+                            ).toLocaleString()}
+                          </strong>
+
+                        </div>
+
+                        <div className="hydro-card">
+
+                          <span>
+                            Reservoir water level
+                          </span>
+
+                          <strong>
+                            {
+                              getHydroValue(
+                                selectedReservoir.id,
+                                "htl"
+                              )
+                            }
+                          </strong>
+
+                          <p>
+                            Htl — water level
+                          </p>
+
+                        </div>
+
+                        <div className="hydro-card">
+
+                          <span>
+                            Inflow
+                          </span>
+
+                          <strong>
+                            {
+                              getHydroValue(
+                                selectedReservoir.id,
+                                "qvao"
+                              )
+                            }
+                          </strong>
+
+                          <p>
+                            Qvao — inflow
+                          </p>
+
+                        </div>
+
+                        <div className="hydro-card">
+
+                          <span>
+                            Powerhouse discharge
+                          </span>
+
+                          <strong>
+                            {
+                              getHydroValue(
+                                selectedReservoir.id,
+                                "power"
+                              )
+                            }
+                          </strong>
+
+                          <p>
+                            Powerhouse flow
+                          </p>
+
+                        </div>
+
+                        <div className="hydro-card">
+
+                          <span>
+                            Spillway discharge
+                          </span>
+
+                          <strong>
+                            {
+                              getHydroValue(
+                                selectedReservoir.id,
+                                "spill"
+                              )
+                            }
+                          </strong>
+
+                          <p>
+                            Qxa qua cua — spillway flow
+                          </p>
+
+                        </div>
+
+                        <div className="hydro-info">
+
+                          <div>
+                            <span>
+                              Data source
+                            </span>
+
+                            <strong>
+                              PCTT Da Nang
+                            </strong>
+                          </div>
+
+                          <div>
+                            <span>
+                              Backend
+                            </span>
+
+                            <strong>
+                              PostgreSQL + FastAPI
+                            </strong>
+                          </div>
+
+                          <div>
+                            <span>
+                              Visualization
+                            </span>
+
+                            <strong>
+                              React + Leaflet WebGIS
+                            </strong>
+                          </div>
+
+                        </div>
+
+                      </div>
+                    )}
+
+                </div>
+              )}
+
+              {!selectedReservoir &&
+                !selectedStation && (
+                  <div className="empty-state">
+
+                    <div className="big-icon">
+                      💧
+                    </div>
+
+                    <h3>
+                      Select a hydrology station
+                      or reservoir
+                    </h3>
+
+                    <p>
+                      Choose a station from the
+                      list for recent observations,
+                      or click a green reservoir
+                      on the map for PCTT monitoring
+                      data.
+                    </p>
+
+                  </div>
+                )}
+
+            </div>
+          )}
 
         </aside>
 

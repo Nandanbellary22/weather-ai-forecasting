@@ -17,7 +17,10 @@ class StationSummary(BaseModel):
     start_time: datetime | None
     end_time: datetime | None
     latest_value: float | None
-
+class StationObservation(BaseModel):
+    station_id: str
+    timestamp: datetime
+    value: float | None
 
 class ForecastMetrics(BaseModel):
     mae: float
