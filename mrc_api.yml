@@ -1,0 +1,1576 @@
+openapi: 3.0.1
+info:
+  title: MRC Information System API
+  description: "\n<p>Welcome to the API documentation for the MRC Information System.\
+    \ The MRC Information System API serves as a centralised gateway to the entire\
+    \ corpus of data stored in the master database of the MRC Information System.</p>\n\
+    <h4>Architecture</h4>\n<p>Internally, the MRC Information System is comprised\
+    \ of multiple separate databases. This API provides unified access to these disparate\
+    \ databases, offering an integrated view and management of the MRC's extensive\
+    \ data assets.</p>\n<h4>Access and Permissions</h4>\n<p>Security is of paramount\
+    \ importance to us. Access to the data is strictly permissions-based, employing\
+    \ a group-based access control system. Each database has its own designated access\
+    \ group.</p>\n<h4>MRC Data Portal</h4>\n<p>For further information, visit the\
+    \ <a href='https://portal.mrcmekong.org/'>MRC Data Portal</a>.</p>\n        "
+  contact:
+    name: MRC Data team
+    url: https://portal.mrcmekong.org
+    email: mrcdata@mrcmekong.org
+  license:
+    name: Mekong River Commission Data Use Licence
+    url: https://portal.mrcmekong.org/about/account-types
+  version: "1.0"
+security:
+- Api-Key: []
+paths:
+  /api/v1/document/doms-documents:
+    get:
+      tags:
+      - Document
+      summary: Lists all DoMS documents
+      description: The response is cached for 24 hours.
+      operationId: domsDocuments
+      responses:
+        "200":
+          description: domsDocuments 200 response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Document"
+  /api/v1/document/download/{uniqueId}:
+    get:
+      tags:
+      - Document
+      summary: 'Downloads a '
+      description: "EXPERIMENTAL: Implementation can change"
+      operationId: download
+      parameters:
+      - name: uniqueId
+        in: path
+        description: "UniqueId of file to download. Must be present (example: `01LPDEHVFRQMF4ZCF2O5FLJ66V7QDO3SV2`)"
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: download 200 response
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+  /api/v1/document/generate-doi:
+    get:
+      tags:
+      - Document
+      operationId: generate
+      responses:
+        "200":
+          description: generate 200 response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Doi"
+  /api/v1/forecast/current:
+    get:
+      tags:
+      - Forecast
+      operationId: getCurrentForecastByStation
+      parameters:
+      - name: station
+        in: query
+        description: Unique identifier of the forecast station
+        required: true
+        explode: false
+        schema:
+          $ref: "#/components/schemas/ForecastStationIdentifier"
+      responses:
+        "200":
+          description: getCurrentForecastByStation 200 response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ActualAndForecastedWaterLevel"
+  /api/v1/geo/feature-data/{name}:
+    get:
+      tags:
+      - Spatial
+      operationId: featureData
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: format
+        in: query
+        explode: false
+        schema:
+          type: string
+          nullable: true
+      responses:
+        "200":
+          description: featureData 200 response
+          content:
+            application/json:
+              schema:
+                type: string
+            text/csv:
+              schema:
+                type: string
+            application/zip:
+              schema:
+                type: string
+  /api/v1/geo/feature-shapefile/{name}:
+    get:
+      tags:
+      - Spatial
+      operationId: featureShapefile
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: featureShapefile 200 response
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+  /api/v1/geo/layers:
+    get:
+      tags:
+      - Spatial
+      summary: Lists all queryable layers
+      description: "EXPERIMENTAL: Implementation can change"
+      operationId: layers
+      responses:
+        "200":
+          description: layers 200 response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Layer"
+  /api/v1/geo/lmba-layer/{layerId}:
+    get:
+      tags:
+      - Spatial
+      summary: Download Lower Mekong Basin Atlas Layer by ID
+      description: Returns a zip file corresponding to the specified layer ID.
+      operationId: getLayerById
+      parameters:
+      - name: layerId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: getLayerById 200 response
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+  /api/v1/geo/lmba-layers:
+    get:
+      tags:
+      - Spatial
+      summary: Lists all Lower Mekong Basin Atlas layers
+      description: "EXPERIMENTAL: Implementation can change"
+      operationId: lowerMekongBasinAtlaslayers
+      responses:
+        "200":
+          description: lowerMekongBasinAtlaslayers 200 response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/LmbAtlasLayer"
+  /api/v1/geo/raster-data/{name}:
+    get:
+      tags:
+      - Spatial
+      summary: Get raster data of a layer
+      description: "EXPERIMENTAL: Implementation can change"
+      operationId: rasterData
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: format
+        in: query
+        explode: false
+        schema:
+          type: string
+          description: Raster format
+          nullable: true
+          enum:
+          - geotiff
+          - kmz
+          - png
+      responses:
+        "200":
+          description: rasterData 200 response
+          content:
+            application/vnd.google-earth.kmz:
+              schema:
+                type: string
+                format: binary
+            image/geotiff:
+              schema:
+                type: string
+                format: binary
+            image/png:
+              schema:
+                type: string
+                format: binary
+  /api/v1/sectoral/mrb-if/data-export/csv:
+    get:
+      tags:
+      - Sectoral
+      summary: Exports the Mekong River Basin Indicator Framework Data as CSV
+      description: "NOTE: Use the identifier as provided by the inventory response"
+      operationId: mrbIndicatorFrameworkDataExportCsv
+      parameters:
+      - name: identifier
+        in: query
+        required: true
+        explode: false
+        schema:
+          type: integer
+          format: int64
+      - name: type
+        in: query
+        required: true
+        explode: false
+        schema:
+          $ref: "#/components/schemas/DataStoreType"
+      - name: administrativeLevel
+        in: query
+        required: true
+        explode: false
+        schema:
+          $ref: "#/components/schemas/AdministrativeLevel"
+      responses:
+        "200":
+          description: mrbIndicatorFrameworkDataExportCsv 200 response
+          content:
+            text/csv:
+              schema:
+                type: string
+  /api/v1/sectoral/mrb-if/data-export/json:
+    get:
+      tags:
+      - Sectoral
+      summary: Exports the Mekong River Basin Indicator Framework Data as JSON
+      description: "NOTE: Use the identifier as provided by the inventory response"
+      operationId: mrbIndicatorFrameworkDataExportJson
+      parameters:
+      - name: identifier
+        in: query
+        required: true
+        explode: false
+        schema:
+          type: integer
+          format: int64
+      - name: type
+        in: query
+        required: true
+        explode: false
+        schema:
+          $ref: "#/components/schemas/DataStoreType"
+      - name: administrativeLevel
+        in: query
+        required: true
+        explode: false
+        schema:
+          $ref: "#/components/schemas/AdministrativeLevel"
+      responses:
+        "200":
+          description: mrbIndicatorFrameworkDataExportJson 200 response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataItemDatasetMetadata"
+  /api/v1/sectoral/mrb-if/inventory:
+    get:
+      tags:
+      - Sectoral
+      summary: Lists the Mekong River Basin Indicator Framework Inventory
+      description: "Lists the Mekong River Basin Indicator Framework Inventory. It\
+        \ presents all available monitoring parameters and data items. NOTE: The Mekong\
+        \ River Basin Indicator Framework database currently contains no public monitoring\
+        \ parameters."
+      operationId: mrbIndicatorFrameworkInventory
+      responses:
+        "200":
+          description: mrbIndicatorFrameworkInventory 200 response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IndicatorFrameworkInventoryItems"
+  /api/v1/time-series/corrected-data:
+    get:
+      tags:
+      - Time-series
+      summary: Retrieve Corrected Time-Series Data
+      description: Fetches the corrected time-series data based on provided unique
+        IDs or human-readable identifiers. The response is cached for a duration of
+        24 hours.
+      operationId: fetchCorrectedTimeSeriesData
+      parameters:
+      - name: uniqueId
+        in: query
+        description: "A list of unique IDs corresponding to one or more time-series.\
+          \ Either `uniqueId` or `identifier` must be specified. Example: `7bb70347dbda404b9b521c9653f4be06`.\
+          \ The maximum number of unique IDs is 10. Usage of `uniqueId` and `identifier`\
+          \ is mutually exclusive."
+        explode: false
+        schema:
+          type: array
+          nullable: true
+          items:
+            type: string
+      - name: identifier
+        in: query
+        description: "A list of human-readable identifiers for one or more time-series.\
+          \ Either `uniqueId` or `identifier` must be specified. Example: `Water Level.Telemetry@LA_013901_[Pakse]`.\
+          \ The maximum number of identifiers is 10. Usage of `uniqueId` and `identifier`\
+          \ is mutually exclusive."
+        explode: false
+        schema:
+          type: array
+          nullable: true
+          items:
+            type: string
+      - name: queryFrom
+        in: query
+        description: "The start date and time for the query in ISO 8601 format. This\
+          \ is optional and defaults to the beginning of the record. Example: `2018-12-12T13:30:30`."
+        schema:
+          type: string
+          format: date-time
+          nullable: true
+      - name: queryTo
+        in: query
+        description: "The end date and time for the query in ISO 8601 format. This\
+          \ is optional and defaults to the end of the record. Example: `2021-12-12T23:59:59`."
+        schema:
+          type: string
+          format: date-time
+          nullable: true
+      responses:
+        "401":
+          description: Authentication error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/MrcApiProblem"
+        "403":
+          description: Authorization error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/MrcApiProblem"
+        "400":
+          description: Invalid arguments
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/MrcApiProblem"
+        "500":
+          description: Internal server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/MrcApiProblem"
+        "200":
+          description: fetchCorrectedTimeSeriesData 200 response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MrcTimeSeriesData"
+  /api/v1/time-series/description-list:
+    get:
+      tags:
+      - Time-series
+      summary: Retrieve Time-Series Data
+      description: Fetches a list of all available time-series based on the specified
+        parameters. The response is cached for a duration of 24 hours to optimise
+        performance.
+      operationId: fetchTimeSeriesDescriptionList
+      parameters:
+      - name: paramGroup
+        in: query
+        explode: false
+        schema:
+          nullable: true
+          allOf:
+          - $ref: "#/components/schemas/ParameterGroup"
+      - name: countryCode
+        in: query
+        explode: false
+        schema:
+          nullable: true
+          allOf:
+          - $ref: "#/components/schemas/CountryCode"
+      - name: pdiesCategory
+        in: query
+        explode: false
+        schema:
+          nullable: true
+          allOf:
+          - $ref: "#/components/schemas/PDIESCategory"
+      - name: parameter
+        in: query
+        explode: false
+        schema:
+          type: string
+          nullable: true
+      responses:
+        "401":
+          description: Authentication error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/MrcApiProblem"
+        "403":
+          description: Authorization error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/MrcApiProblem"
+        "400":
+          description: Invalid arguments
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/MrcApiProblem"
+        "500":
+          description: Internal server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/MrcApiProblem"
+        "200":
+          description: fetchTimeSeriesDescriptionList 200 response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TimeSeriesDto"
+  /api/v1/time-series/description-list/csv:
+    get:
+      tags:
+      - Time-series
+      operationId: getTimesSeriesDescriptionListCSV
+      parameters:
+      - name: paramGroup
+        in: query
+        explode: false
+        schema:
+          nullable: true
+          allOf:
+          - $ref: "#/components/schemas/ParameterGroup"
+      - name: countryCode
+        in: query
+        explode: false
+        schema:
+          nullable: true
+          allOf:
+          - $ref: "#/components/schemas/CountryCode"
+      - name: pdiesCategory
+        in: query
+        explode: false
+        schema:
+          nullable: true
+          allOf:
+          - $ref: "#/components/schemas/PDIESCategory"
+      - name: parameter
+        in: query
+        explode: false
+        schema:
+          type: string
+          nullable: true
+      responses:
+        "401":
+          description: Authentication error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/MrcApiProblem"
+        "403":
+          description: Authorization error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/MrcApiProblem"
+        "400":
+          description: Invalid arguments
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/MrcApiProblem"
+        "500":
+          description: Internal server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/MrcApiProblem"
+        "200":
+          description: getTimesSeriesDescriptionListCSV 200 response
+          content:
+            application/json:
+              schema:
+                type: string
+                format: binary
+  /api/v1/time-series/inventory/location:
+    get:
+      tags:
+      - Time-series Inventory
+      summary: "Lists available time-series locations, including their counts"
+      description: Returned time-series location can be used in other method call
+        to filter data by each group.
+      operationId: location
+      responses:
+        "401":
+          description: Authentication error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/MrcApiProblem"
+        "403":
+          description: Authorization error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/MrcApiProblem"
+        "400":
+          description: Invalid arguments
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/MrcApiProblem"
+        "500":
+          description: Internal server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/MrcApiProblem"
+        "200":
+          description: location 200 response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/LocationCount"
+  /api/v1/time-series/inventory/parameter:
+    get:
+      tags:
+      - Time-series Inventory
+      summary: "Lists available time-series parameters, including their counts"
+      description: Returned time-series parameters can be used in other method call
+        to filter data by each group.
+      operationId: parameter
+      responses:
+        "401":
+          description: Authentication error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/MrcApiProblem"
+        "403":
+          description: Authorization error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/MrcApiProblem"
+        "400":
+          description: Invalid arguments
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/MrcApiProblem"
+        "500":
+          description: Internal server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/MrcApiProblem"
+        "200":
+          description: parameter 200 response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ParameterCount"
+  /api/v1/time-series/inventory/parameter-group:
+    get:
+      tags:
+      - Time-series Inventory
+      summary: "Lists available parameter groups, including their counts"
+      description: Returned parameter groups can be used in other method call to filter
+        data by each group.
+      operationId: parameterGroup
+      responses:
+        "401":
+          description: Authentication error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/MrcApiProblem"
+        "403":
+          description: Authorization error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/MrcApiProblem"
+        "400":
+          description: Invalid arguments
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/MrcApiProblem"
+        "500":
+          description: Internal server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/MrcApiProblem"
+        "200":
+          description: parameterGroup 200 response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ParameterGroupCount"
+  /api/v1/time-series/inventory/pdies-category:
+    get:
+      tags:
+      - Time-series Inventory
+      summary: "Lists available PDIES categories, including their counts"
+      description: Returned PDIES categories can be used in other method call to filter
+        data by each group.
+      operationId: pdiesCategory
+      responses:
+        "401":
+          description: Authentication error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/MrcApiProblem"
+        "403":
+          description: Authorization error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/MrcApiProblem"
+        "400":
+          description: Invalid arguments
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/MrcApiProblem"
+        "500":
+          description: Internal server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/MrcApiProblem"
+        "200":
+          description: pdiesCategory 200 response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PDIESCategoryCount"
+  /api/v1/time-series/location:
+    get:
+      tags:
+      - Time-series
+      summary: Lists all station locations
+      description: The response is cached for 24 hours.
+      operationId: location_1
+      parameters:
+      - name: countryCode
+        in: query
+        explode: false
+        schema:
+          description: ISO 3166-1 alpha-2 code
+          nullable: true
+          allOf:
+          - $ref: "#/components/schemas/CountryCode"
+          - type: object
+            enum:
+            - LA
+            - KH
+            - TH
+            - VN
+            - CN
+      responses:
+        "401":
+          description: Authentication error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/MrcApiProblem"
+        "403":
+          description: Authorization error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/MrcApiProblem"
+        "400":
+          description: Invalid arguments
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/MrcApiProblem"
+        "500":
+          description: Internal server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/MrcApiProblem"
+        "200":
+          description: location_1 200 response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Location"
+  /api/v1/time-series/location/csv:
+    get:
+      tags:
+      - Time-series
+      summary: Lists all station locations
+      description: The response is cached for 24 hours.
+      operationId: locationCsv
+      parameters:
+      - name: countryCode
+        in: query
+        explode: false
+        schema:
+          description: ISO 3166-1 alpha-2 code
+          nullable: true
+          allOf:
+          - $ref: "#/components/schemas/CountryCode"
+          - type: object
+            enum:
+            - LA
+            - KH
+            - TH
+            - VN
+            - CN
+      responses:
+        "401":
+          description: Authentication error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/MrcApiProblem"
+        "403":
+          description: Authorization error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/MrcApiProblem"
+        "400":
+          description: Invalid arguments
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/MrcApiProblem"
+        "500":
+          description: Internal server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/MrcApiProblem"
+        "200":
+          description: locationCsv 200 response
+          content:
+            application/json:
+              schema:
+                type: string
+                format: binary
+  /api/v1/time-series/telemetry/recent/inventory:
+    get:
+      tags:
+      - Time-series
+      summary: Retrieves the recent time series inventory.
+      description: Retrieves the recent time series inventory. This function fetches
+        the most recent time series inventory data from the cache service. It provides
+        a list of available time series data that can be used for further analysis
+        or display.
+      operationId: recentTimeSeriesInventory
+      responses:
+        "200":
+          description: "A \\[List\\] of \\[TimeSeriesDto\\] objects representing the\
+            \ recent time series inventory. Each \\[TimeSeriesDto\\] in the list contains\
+            \ information about a specific time series, such as its identifier, name,\
+            \ and other relevant metadata."
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TimeSeriesDto"
+  /api/v1/time-series/telemetry/recent/measurement:
+    get:
+      tags:
+      - Time-series
+      summary: Retrieves recent measurements for specified time series identifiers.
+      description: Retrieves recent measurements for specified time series identifiers.
+        This function fetches the most recent measurements for the given time series
+        identifiers from the cache service. It's designed to provide quick access
+        to the latest data points for multiple time series.
+      operationId: recentByTimeSeriesIdentifier
+      parameters:
+      - name: identifiers
+        in: query
+        description: A list of time series identifiers for which to retrieve recent
+          measurements. The list is limited to a maximum of 10 identifiers per request.
+        required: true
+        explode: false
+        schema:
+          type: array
+          items:
+            type: string
+      responses:
+        "200":
+          description: recentByTimeSeriesIdentifier 200 response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MrcTimeSeriesData"
+components:
+  schemas:
+    ActualAndForecastedWaterLevel:
+      required:
+      - day
+      - ltaValue
+      - stationName
+      type: object
+      properties:
+        stationName:
+          type: string
+        day:
+          type: string
+          format: date
+        actualValue:
+          type: number
+          nullable: true
+        forecastValue:
+          type: number
+          nullable: true
+        ltaValue:
+          type: number
+    AdministrativeLevel:
+      type: string
+      enum:
+      - COUNTRY
+      - PROVINCE
+    CountryCode:
+      type: string
+      enum:
+      - LA
+      - KH
+      - TH
+      - VN
+      - CN
+    DataItemCsvRowData:
+      required:
+      - areaCode
+      - areaName
+      - dataValueUnits
+      - time
+      type: object
+      properties:
+        time:
+          type: integer
+          format: int32
+        areaCode:
+          type: string
+        areaName:
+          type: string
+        dataValueUnits:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/DataValueUnit"
+    DataItemDatasetMetadata:
+      required:
+      - data
+      - metadata
+      type: object
+      properties:
+        metadata:
+          $ref: "#/components/schemas/DatasetMetadata"
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/DataItemCsvRowData"
+    DataPoint:
+      required:
+      - timestamp
+      - value
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        value:
+          type: number
+        display:
+          type: string
+          nullable: true
+    DataStoreType:
+      type: string
+      enum:
+      - MONITORING_PARAMETER
+      - DATA_ITEM
+    DataValueUnit:
+      type: object
+      properties:
+        value:
+          type: number
+          nullable: true
+        unit:
+          type: string
+          nullable: true
+    DatasetMetadata:
+      required:
+      - created
+      - dataCombinations
+      - dataItemId
+      - dataItemName
+      - dataset
+      - notes
+      - source
+      - sourceCategory
+      - spatialScale
+      - temporalScale
+      - timeScaleEnd
+      - timeScaleStart
+      type: object
+      properties:
+        dataset:
+          type: string
+        dataItemName:
+          type: string
+        dataItemId:
+          type: string
+        spatialScale:
+          type: string
+        temporalScale:
+          type: string
+        timeScaleStart:
+          type: integer
+          format: int32
+        timeScaleEnd:
+          type: integer
+          format: int32
+        dataCombinations:
+          type: array
+          items:
+            type: string
+        sourceCategory:
+          type: string
+        source:
+          type: string
+        notes:
+          type: string
+        created:
+          type: string
+          format: date
+    Document:
+      required:
+      - createdDateTime
+      - divisions
+      - fileMimeType
+      - functions
+      - id
+      - keywords
+      - lastModifiedDateTime
+      - name
+      - siteName
+      - size
+      - topics
+      type: object
+      properties:
+        siteName:
+          type: string
+        id:
+          type: string
+        name:
+          type: string
+        doi:
+          type: string
+          nullable: true
+        abstract:
+          type: string
+          nullable: true
+        fileMimeType:
+          type: string
+        size:
+          type: integer
+          format: int64
+        contentTypeName:
+          type: string
+          nullable: true
+        createdDateTime:
+          type: string
+          format: date-time
+        lastModifiedDateTime:
+          type: string
+          format: date-time
+        publicationDate:
+          type: string
+          format: date-time
+          nullable: true
+        functions:
+          type: array
+          items:
+            type: string
+        topics:
+          type: array
+          items:
+            type: string
+        keywords:
+          type: array
+          items:
+            type: string
+        divisions:
+          type: array
+          items:
+            type: string
+        publicationLanguage:
+          type: string
+          nullable: true
+        publicationCategory:
+          type: string
+          nullable: true
+    Doi:
+      required:
+      - doi
+      type: object
+      properties:
+        doi:
+          type: string
+    ForecastStationIdentifier:
+      type: string
+      enum:
+      - LUANG_PRABANG
+      - PAKSANE
+      - PAKSE
+      - THAKHEK
+      - VIENTIANE
+      - SAVANNAKHET
+      - CHIANG_KHAN
+      - CHIANG_SAEN
+      - MUKDAHAN
+      - NAKHON_PHANOM
+      - KHONG_CHIAM
+      - NONG_KHAI
+      - KOH_KHEL_BASSAC
+      - KOMPONG_CHAM
+      - KRATIE
+      - NEAK_LUONG
+      - PHNOM_PENH_BASSAC
+      - PHNOM_PENH_PORT
+      - PREK_KDAM
+      - STUNG_TRENG
+      - CHAU_DOC
+      - TAN_CHAU
+    IndicatorFrameworkInventoryItems:
+      required:
+      - dataItems
+      - monitoringParameters
+      type: object
+      properties:
+        monitoringParameters:
+          type: array
+          items:
+            $ref: "#/components/schemas/InventoryItem"
+        dataItems:
+          type: array
+          items:
+            $ref: "#/components/schemas/InventoryItem"
+    Info:
+      required:
+      - content
+      - name
+      type: object
+      properties:
+        name:
+          type: string
+        content:
+          type: string
+    InventoryItem:
+      required:
+      - identifier
+      - name
+      type: object
+      properties:
+        identifier:
+          type: integer
+          format: int64
+        name:
+          type: string
+        topic:
+          type: string
+          nullable: true
+    Layer:
+      required:
+      - abstract
+      - boundingBox
+      - csr
+      - keywords
+      - legend
+      - name
+      - style
+      - title
+      - type
+      type: object
+      properties:
+        name:
+          type: string
+        title:
+          type: string
+        abstract:
+          type: string
+        type:
+          $ref: "#/components/schemas/Layer.LayerType"
+        csr:
+          type: string
+        boundingBox:
+          $ref: "#/components/schemas/Layer.BoundingBox"
+        keywords:
+          type: array
+          items:
+            type: string
+        legend:
+          $ref: "#/components/schemas/Layer.Legend"
+        style:
+          $ref: "#/components/schemas/Layer.Style"
+    Layer.BoundingBox:
+      required:
+      - maxx
+      - maxy
+      - minx
+      - miny
+      type: object
+      properties:
+        minx:
+          type: number
+        miny:
+          type: number
+        maxx:
+          type: number
+        maxy:
+          type: number
+    Layer.LayerType:
+      type: string
+      enum:
+      - FEATURE
+      - RASTER
+    Layer.Legend:
+      required:
+      - format
+      - href
+      type: object
+      properties:
+        href:
+          type: string
+        format:
+          type: string
+    Layer.Style:
+      required:
+      - name
+      - title
+      type: object
+      properties:
+        title:
+          type: string
+        name:
+          type: string
+    LmbAtlasLayer:
+      required:
+      - id
+      - identifier
+      - name
+      - thumbnail
+      - url
+      type: object
+      properties:
+        access:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        dimension:
+          type: string
+          nullable: true
+        baseLayer:
+          type: boolean
+          nullable: true
+        id:
+          type: string
+        identifier:
+          type: string
+        name:
+          type: string
+        published:
+          type: string
+          format: date-time
+          nullable: true
+        source:
+          type: string
+          nullable: true
+        summary:
+          type: string
+          nullable: true
+        url:
+          type: string
+        thumbnail:
+          type: string
+        info:
+          type: array
+          nullable: true
+          items:
+            $ref: "#/components/schemas/Info"
+    Location:
+      required:
+      - country
+      - countryCode
+      - locationCode
+      - locationIdentifier
+      - locationName
+      - uniqueId
+      type: object
+      properties:
+        uniqueId:
+          type: string
+        locationIdentifier:
+          type: string
+        locationCode:
+          type: string
+        locationName:
+          type: string
+        country:
+          type: string
+        countryCode:
+          description: ISO 3166-1 alpha-2 code
+          allOf:
+          - $ref: "#/components/schemas/CountryCode"
+          - type: object
+            enum:
+            - LA
+            - KH
+            - TH
+            - VN
+            - CN
+        shortName:
+          type: string
+          nullable: true
+        elevation:
+          type: integer
+          format: int32
+          nullable: true
+        elevationUnits:
+          type: string
+          nullable: true
+        latitude:
+          type: number
+          format: double
+          nullable: true
+        longitude:
+          type: number
+          format: double
+          nullable: true
+        river:
+          type: string
+          nullable: true
+        utcOffset:
+          type: integer
+          format: int32
+          nullable: true
+        tags:
+          type: string
+          nullable: true
+        zeroGaugeAboveMSL:
+          type: number
+          format: double
+          nullable: true
+        alarmLevel:
+          type: number
+          format: double
+          nullable: true
+        floodLevel:
+          type: number
+          format: double
+          nullable: true
+      description: Location description
+    LocationCount:
+      required:
+      - count
+      - location
+      type: object
+      properties:
+        location:
+          type: string
+        count:
+          type: integer
+          format: int32
+    MrcApiProblem:
+      required:
+      - detail
+      - status
+      - title
+      - type
+      type: object
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+          format: int32
+        detail:
+          type: string
+      description: Created by Frank Lieber (liefra) on 2021-09-21.
+    MrcTimeSeriesData:
+      required:
+      - dataPoints
+      - label
+      - locationIdentifier
+      - numPoints
+      - parameter
+      - responseTime
+      - uniqueId
+      - unit
+      type: object
+      properties:
+        uniqueId:
+          type: string
+        label:
+          type: string
+        locationIdentifier:
+          type: string
+        numPoints:
+          type: integer
+          format: int32
+        parameter:
+          type: string
+        unit:
+          type: string
+        endTime:
+          type: string
+          format: date-time
+          nullable: true
+        startTime:
+          type: string
+          format: date-time
+          nullable: true
+        dataPoints:
+          type: array
+          items:
+            $ref: "#/components/schemas/DataPoint"
+        responseTime:
+          type: string
+          format: date-time
+    PDIESCategory:
+      type: string
+      enum:
+      - water_resources
+      - topography
+      - natural_resources
+      - agriculture
+      - navigation_and_transport
+      - flood_and_drought_management_and_mitigation
+      - infrastructure
+      - urbanization_and_industrialization
+      - environment_and_ecology
+      - administrative_boundaries
+      - socio_economy
+      - tourism
+    PDIESCategoryCount:
+      required:
+      - count
+      - pdiesCategory
+      type: object
+      properties:
+        pdiesCategory:
+          $ref: "#/components/schemas/PDIESCategory"
+        count:
+          type: integer
+          format: int32
+    ParameterCount:
+      required:
+      - count
+      - parameter
+      type: object
+      properties:
+        parameter:
+          type: string
+        count:
+          type: integer
+          format: int32
+    ParameterGroup:
+      type: string
+      enum:
+      - hydro-meteorology
+      - climate
+      - water-quality
+      - ecological-health
+      - fishery
+      - hydropower
+      - dsmp
+      - drought
+      - other
+      x-enum-varnames:
+      - HYDRO_METEOROLOGY
+      - CLIMATE
+      - WATER_QUALITY
+      - ECOLOGICAL_HEALTH
+      - FISHERY
+      - HYDROPOWER
+      - DSMP
+      - DROUGHT
+      - OTHER
+    ParameterGroupCount:
+      required:
+      - count
+      - parameterGroup
+      type: object
+      properties:
+        parameterGroup:
+          $ref: "#/components/schemas/ParameterGroup"
+        count:
+          type: integer
+          format: int32
+    TimeSeriesDto:
+      required:
+      - countryIso
+      - countryName
+      - identifier
+      - label
+      - lastModified
+      - locationCode
+      - locationName
+      - parameter
+      - parameterGroup
+      - pdiesCategory
+      - publish
+      - timeSeriesLabel
+      - timeSeriesType
+      - uniqueId
+      - unit
+      - utcOffset
+      type: object
+      properties:
+        uniqueId:
+          type: string
+        identifier:
+          type: string
+        locationCode:
+          type: string
+        locationName:
+          type: string
+        countryName:
+          type: string
+        countryIso:
+          type: string
+        parameterGroup:
+          $ref: "#/components/schemas/ParameterGroup"
+        pdiesCategory:
+          $ref: "#/components/schemas/PDIESCategory"
+        timeSeriesLabel:
+          $ref: "#/components/schemas/TimeSeriesLabel"
+        correctedStartTime:
+          type: string
+          format: date-time
+          nullable: true
+        correctedEndTime:
+          type: string
+          format: date-time
+          nullable: true
+        parameter:
+          type: string
+        label:
+          type: string
+        lastModified:
+          type: string
+          format: date-time
+        utcOffset:
+          type: integer
+          format: int32
+        description:
+          type: string
+          nullable: true
+        timeSeriesType:
+          type: string
+        rawStartTime:
+          type: string
+          format: date-time
+          nullable: true
+        rawEndTime:
+          type: string
+          format: date-time
+          nullable: true
+        unit:
+          type: string
+        publish:
+          type: boolean
+    TimeSeriesLabel:
+      type: string
+      enum:
+      - telemetry
+      - manual
+      - water_quality
+      - ecological-health
+      - daily
+      - hydropower
+      - dsmp
+      - drought
+      - other
+      x-enum-varnames:
+      - TELEMETRY
+      - MANUAL
+      - WATER_QUALITY
+      - ECOLOGICAL_HEALTH
+      - DAILY
+      - HYDROPOWER
+      - DSMP
+      - DROUGHT
+      - OTHER
+  securitySchemes:
+    Api-Key:
+      type: apiKey
+      name: X-API-Key
+      in: header
