@@ -30,3 +30,6 @@ vndms_*.js
 vndms_*.html
 vndms_decoded_strings.txt
 decode_vndms.py
+
+_upload_snapshot/
+weather-ai-forecasting-upload.zip

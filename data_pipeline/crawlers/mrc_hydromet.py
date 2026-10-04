@@ -6,6 +6,7 @@ import requests
 
 
 BASE_URL = "https://api.mrcmekong.org/api/v1/time-series/telemetry"
+
 STATIONS_URL = f"{BASE_URL}/recent/stations"
 MEASUREMENT_URL = f"{BASE_URL}/recent/measurement/{{station_id}}"
 
@@ -64,7 +65,7 @@ def filter_vietnam_stations(data):
 
 
 def build_station_dataframe(stations):
-    """Create station metadata dataframe."""
+    """Create complete Vietnam station metadata dataframe."""
 
     rows = []
 
@@ -79,6 +80,8 @@ def build_station_dataframe(stations):
                 "river": station.get("river"),
                 "country": station.get("country"),
                 "station_type": station.get("stationType"),
+
+                # Current snapshot measurements
                 "water_level": station.get("waterLevel"),
                 "rainfall": station.get("rainFall"),
                 "rainfall_1h": station.get("rainFall1H"),
@@ -86,18 +89,119 @@ def build_station_dataframe(stations):
                 "rainfall_12h": station.get("rainFall12H"),
                 "rainfall_24h": station.get("rainFall24H"),
                 "rainfall_7to7": station.get("rainFall7to7"),
+
+                # Hydrological thresholds
+                "flood_stage": station.get("floodStage"),
+                "alarm_stage": station.get("alarmStage"),
+                "mean_sea_level": station.get("meanSeaLevel"),
+
+                # Sensor information
                 "water_level_sensor": station.get("wlSensor"),
                 "rainfall_sensor": station.get("rainfallSensor"),
                 "temperature_sensor": station.get("tempSensor"),
                 "battery_sensor": station.get("batterySensor"),
                 "water_quality_sensors": station.get("wqSensors"),
+                "water_level_sensor_type": station.get("wlSensorType"),
+
+                # Station status
                 "success_rate": station.get("successRate"),
                 "last_status": station.get("lastStatus"),
                 "last_measurement": station.get("lastMeasurement"),
+                "telemetry_available": bool(
+                    station.get("lastMeasurement")
+                ),
             }
         )
 
     return pd.DataFrame(rows)
+
+
+def build_latest_snapshot_dataframe(stations):
+    """
+    Build a current MRC snapshot.
+
+    This is intentionally separate from historical measurements.
+    The rainfall accumulation fields are current snapshot values
+    and must not be treated as historical time-series values.
+    """
+
+    rows = []
+
+    for station in stations:
+
+        rows.append(
+            {
+                "station_id": station.get("stationId"),
+                "station_name": station.get("name"),
+                "latitude": station.get("latitude"),
+                "longitude": station.get("longitude"),
+                "river": station.get("river"),
+                "country": station.get("country"),
+                "station_type": station.get("stationType"),
+
+                # Current hydrometeorological values
+                "water_level": station.get("waterLevel"),
+                "rainfall": station.get("rainFall"),
+                "rainfall_1h": station.get("rainFall1H"),
+                "rainfall_6h": station.get("rainFall6H"),
+                "rainfall_12h": station.get("rainFall12H"),
+                "rainfall_24h": station.get("rainFall24H"),
+                "rainfall_7to7": station.get("rainFall7to7"),
+
+                # Flood / alarm thresholds
+                "flood_stage": station.get("floodStage"),
+                "alarm_stage": station.get("alarmStage"),
+                "mean_sea_level": station.get("meanSeaLevel"),
+
+                # Sensors
+                "water_level_sensor": station.get("wlSensor"),
+                "rainfall_sensor": station.get("rainfallSensor"),
+                "temperature_sensor": station.get("tempSensor"),
+                "battery_sensor": station.get("batterySensor"),
+                "water_quality_sensors": station.get("wqSensors"),
+                "water_level_sensor_type": station.get("wlSensorType"),
+
+                # Status
+                "success_rate": station.get("successRate"),
+                "last_status": station.get("lastStatus"),
+                "last_measurement": station.get("lastMeasurement"),
+                "telemetry_available": bool(
+                    station.get("lastMeasurement")
+                ),
+            }
+        )
+
+    df = pd.DataFrame(rows)
+
+    if not df.empty:
+
+        numeric_columns = [
+            "latitude",
+            "longitude",
+            "water_level",
+            "rainfall",
+            "rainfall_1h",
+            "rainfall_6h",
+            "rainfall_12h",
+            "rainfall_24h",
+            "rainfall_7to7",
+            "flood_stage",
+            "alarm_stage",
+            "mean_sea_level",
+            "success_rate",
+        ]
+
+        for column in numeric_columns:
+            df[column] = pd.to_numeric(
+                df[column],
+                errors="coerce",
+            )
+
+        df = df.sort_values(
+            "station_id"
+        ).reset_index(drop=True)
+
+    return df
 
 
 def fetch_station_measurements(station_id):
@@ -142,22 +246,49 @@ def fetch_station_measurements(station_id):
 
 
 def collect_historical_measurements(stations):
-    """Collect recent measurements from every Vietnam station."""
+    """
+    Collect historical measurements only from stations that
+    currently expose telemetry.
+
+    Stations without a lastMeasurement are retained in metadata
+    but are not repeatedly queried for historical measurements.
+    """
 
     all_rows = []
+
+    telemetry_stations = [
+        station
+        for station in stations
+        if station.get("lastMeasurement")
+    ]
 
     print()
     print("=" * 70)
     print("MRC HISTORICAL MEASUREMENT COLLECTION")
     print("=" * 70)
 
-    for index, station in enumerate(stations, start=1):
+    print(
+        f"Stations with telemetry: "
+        f"{len(telemetry_stations)}"
+    )
+
+    print(
+        f"Stations without telemetry: "
+        f"{len(stations) - len(telemetry_stations)}"
+    )
+
+    print()
+
+    for index, station in enumerate(
+        telemetry_stations,
+        start=1,
+    ):
 
         station_id = station.get("stationId")
         station_name = station.get("name")
 
         print(
-            f"[{index}/{len(stations)}] "
+            f"[{index}/{len(telemetry_stations)}] "
             f"{station_id} - {station_name}"
         )
 
@@ -181,17 +312,21 @@ def collect_historical_measurements(stations):
                     f"  Measurements : {len(rows)}"
                 )
 
-                print(
-                    f"  Oldest       : {min(timestamps)}"
-                )
+                if timestamps:
 
-                print(
-                    f"  Newest       : {max(timestamps)}"
-                )
+                    print(
+                        f"  Oldest       : {min(timestamps)}"
+                    )
+
+                    print(
+                        f"  Newest       : {max(timestamps)}"
+                    )
 
             else:
 
-                print("  Measurements : 0")
+                print(
+                    "  Measurements : 0"
+                )
 
         except requests.RequestException as exc:
 
@@ -212,7 +347,7 @@ def collect_historical_measurements(stations):
 
 
 def clean_measurements(df):
-    """Clean and normalize MRC measurements."""
+    """Clean and normalize MRC historical measurements."""
 
     if df.empty:
         return df
@@ -220,6 +355,7 @@ def clean_measurements(df):
     df["timestamp_utc"] = pd.to_datetime(
         df["timestamp_utc"],
         utc=True,
+        errors="coerce",
     )
 
     # Convert UTC to Vietnam local time.
@@ -254,11 +390,19 @@ def clean_measurements(df):
         ]
     ]
 
-    df = df.drop_duplicates(
+    df = df.dropna(
         subset=[
             "station_id",
             "timestamp_utc",
         ]
+    )
+
+    df = df.drop_duplicates(
+        subset=[
+            "station_id",
+            "timestamp_utc",
+        ],
+        keep="last",
     )
 
     df = df.sort_values(
@@ -275,9 +419,10 @@ def clean_measurements(df):
 
 def save_data(
     stations_df,
+    latest_df,
     measurements_df,
 ):
-    """Save MRC station metadata and historical measurements."""
+    """Save station metadata, current snapshot and historical data."""
 
     os.makedirs(
         OUTPUT_DIR,
@@ -296,6 +441,17 @@ def save_data(
         f"{STATIONS_OUTPUT}"
     )
 
+    latest_df.to_csv(
+        LATEST_OUTPUT,
+        index=False,
+        encoding="utf-8-sig",
+    )
+
+    print(
+        f"Saved current snapshot: "
+        f"{LATEST_OUTPUT}"
+    )
+
     measurements_df.to_csv(
         HISTORY_OUTPUT,
         index=False,
@@ -307,31 +463,10 @@ def save_data(
         f"{HISTORY_OUTPUT}"
     )
 
-    # Save latest observation for each station.
-    if not measurements_df.empty:
-
-        latest = (
-            measurements_df
-            .sort_values("timestamp_utc")
-            .groupby("station_id", as_index=False)
-            .tail(1)
-            .sort_values("station_id")
-        )
-
-        latest.to_csv(
-            LATEST_OUTPUT,
-            index=False,
-            encoding="utf-8-sig",
-        )
-
-        print(
-            f"Saved latest measurements: "
-            f"{LATEST_OUTPUT}"
-        )
-
 
 def print_summary(
     stations_df,
+    latest_df,
     measurements_df,
 ):
     """Print collection summary."""
@@ -346,23 +481,37 @@ def print_summary(
         f"{len(stations_df)}"
     )
 
+    telemetry_count = int(
+        stations_df["telemetry_available"].sum()
+    )
+
+    print(
+        f"Stations with telemetry: "
+        f"{telemetry_count}"
+    )
+
+    print(
+        f"Stations without data  : "
+        f"{len(stations_df) - telemetry_count}"
+    )
+
     print(
         f"Historical measurements: "
         f"{len(measurements_df)}"
     )
 
+    print(
+        f"Current snapshots      : "
+        f"{len(latest_df)}"
+    )
+
+    print()
+
     if not measurements_df.empty:
 
-        print()
-
         print(
-            f"Stations with data     : "
+            f"Historical stations    : "
             f"{measurements_df['station_id'].nunique()}"
-        )
-
-        print(
-            f"Stations without data  : "
-            f"{len(stations_df) - measurements_df['station_id'].nunique()}"
         )
 
         print()
@@ -384,9 +533,7 @@ def print_summary(
 
         print()
 
-        print(
-            "Overall time range:"
-        )
+        print("Overall historical time range:")
 
         print(
             f"  Oldest: "
@@ -400,7 +547,7 @@ def print_summary(
 
         print()
 
-        print("Available variables:")
+        print("Historical variables:")
 
         print(
             f"  Water level : "
@@ -421,6 +568,35 @@ def print_summary(
             f"  Battery     : "
             f"{measurements_df['battery'].notna().sum()} records"
         )
+
+    print()
+
+    if not latest_df.empty:
+
+        print("Current snapshot variables:")
+
+        snapshot_columns = [
+            "water_level",
+            "rainfall",
+            "rainfall_1h",
+            "rainfall_6h",
+            "rainfall_12h",
+            "rainfall_24h",
+            "rainfall_7to7",
+        ]
+
+        for column in snapshot_columns:
+
+            if column in latest_df.columns:
+
+                available = int(
+                    latest_df[column].notna().sum()
+                )
+
+                print(
+                    f"  {column:<14}: "
+                    f"{available}/{len(latest_df)} stations"
+                )
 
     print("=" * 70)
 
@@ -449,12 +625,24 @@ def main():
                 "No Vietnam stations found."
             )
 
+        # --------------------------------------------------
+        # 2. Build station metadata
+        # --------------------------------------------------
+
         stations_df = build_station_dataframe(
             vietnam_stations
         )
 
         # --------------------------------------------------
-        # 2. Collect recent historical measurements
+        # 3. Build current snapshot
+        # --------------------------------------------------
+
+        latest_df = build_latest_snapshot_dataframe(
+            vietnam_stations
+        )
+
+        # --------------------------------------------------
+        # 4. Collect historical measurements
         # --------------------------------------------------
 
         measurements_df = (
@@ -464,7 +652,7 @@ def main():
         )
 
         # --------------------------------------------------
-        # 3. Clean data
+        # 5. Clean historical data
         # --------------------------------------------------
 
         measurements_df = clean_measurements(
@@ -472,20 +660,22 @@ def main():
         )
 
         # --------------------------------------------------
-        # 4. Save
+        # 6. Save
         # --------------------------------------------------
 
         save_data(
             stations_df,
+            latest_df,
             measurements_df,
         )
 
         # --------------------------------------------------
-        # 5. Summary
+        # 7. Summary
         # --------------------------------------------------
 
         print_summary(
             stations_df,
+            latest_df,
             measurements_df,
         )
 
