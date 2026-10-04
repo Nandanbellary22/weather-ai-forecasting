@@ -4,68 +4,89 @@ import joblib
 import pandas as pd
 
 
-MODEL_FILE = Path(
-    "models/weather/rainfall_linear_regression.joblib"
+# ============================================================
+# PATHS
+# ============================================================
+
+BASE_DIR = Path(__file__).resolve().parents[2]
+
+MODEL_FILE = (
+    BASE_DIR
+    / "models"
+    / "weather"
+    / "rainfall_500_model.joblib"
 )
 
-FEATURE_FILE = Path(
-    "data/processed/weather/rainfall_forecast_features.csv"
+FEATURE_FILE = (
+    BASE_DIR
+    / "data"
+    / "processed"
+    / "weather_features"
+    / "rainfall_features_500.csv"
 )
 
 
-FEATURES = [
-    "temperature_2m",
-    "precipitation_mm",
-    "relative_humidity_2m",
-    "surface_pressure_hpa",
-    "wind_speed_10m",
-    "cloud_cover",
-    "latitude",
-    "longitude",
-    "hour",
-    "day_of_week",
-    "day_of_month",
-    "month",
-    "day_of_year",
-    "precipitation_lag_1h",
-    "precipitation_lag_3h",
-    "precipitation_lag_6h",
-    "precipitation_lag_12h",
-    "precipitation_lag_24h",
-    "temperature_2m_lag_1h",
-    "relative_humidity_2m_lag_1h",
-    "surface_pressure_hpa_lag_1h",
-    "wind_speed_10m_lag_1h",
-    "cloud_cover_lag_1h",
-    "precipitation_rolling_sum_3h",
-    "precipitation_rolling_mean_3h",
-    "precipitation_rolling_sum_6h",
-    "precipitation_rolling_mean_6h",
-    "precipitation_rolling_sum_12h",
-    "precipitation_rolling_mean_12h",
-    "precipitation_rolling_sum_24h",
-    "precipitation_rolling_mean_24h",
-]
-
+# ============================================================
+# GLOBAL CACHE
+# ============================================================
 
 _model = None
 _features = None
 
 
+# ============================================================
+# MODEL
+# ============================================================
+
 def load_model():
+
     global _model
 
     if _model is None:
-        _model = joblib.load(MODEL_FILE)
+
+        if not MODEL_FILE.exists():
+            raise FileNotFoundError(
+                f"Rainfall model not found: "
+                f"{MODEL_FILE}"
+            )
+
+        package = joblib.load(
+            MODEL_FILE
+        )
+
+        # New 500-location training script
+        # saves a dictionary containing the model.
+        if isinstance(package, dict):
+
+            _model = package["model"]
+
+        else:
+
+            # Backward compatibility
+            _model = package
 
     return _model
 
 
+# ============================================================
+# FEATURES
+# ============================================================
+
 def load_features():
+
     global _features
 
     if _features is None:
-        _features = pd.read_csv(FEATURE_FILE)
+
+        if not FEATURE_FILE.exists():
+            raise FileNotFoundError(
+                f"Rainfall feature file not found: "
+                f"{FEATURE_FILE}"
+            )
+
+        _features = pd.read_csv(
+            FEATURE_FILE
+        )
 
         _features["timestamp"] = pd.to_datetime(
             _features["timestamp"]
@@ -74,12 +95,21 @@ def load_features():
     return _features
 
 
+# ============================================================
+# PREDICTION
+# ============================================================
+
 def predict_next_hour_rainfall(
     location_code: str,
 ):
-    df = load_features()
 
-    location_code = location_code.upper()
+    location_code = (
+        location_code
+        .strip()
+        .upper()
+    )
+
+    df = load_features()
 
     location_data = (
         df[
@@ -91,26 +121,76 @@ def predict_next_hour_rainfall(
     )
 
     if location_data.empty:
+
         raise ValueError(
-            f"No rainfall data found for location: "
-            f"{location_code}"
+            f"No rainfall data found for "
+            f"location: {location_code}"
         )
+
+    # --------------------------------------------------------
+    # Latest feature row
+    # --------------------------------------------------------
 
     latest = location_data.iloc[-1]
 
-    X = latest[
-        FEATURES
-    ].to_frame().T
+    # --------------------------------------------------------
+    # Load model
+    # --------------------------------------------------------
 
     model = load_model()
 
+    # --------------------------------------------------------
+    # Use exact features used during training
+    # --------------------------------------------------------
+
+    if hasattr(
+        model,
+        "feature_names_in_",
+    ):
+
+        features = list(
+            model.feature_names_in_
+        )
+
+    else:
+
+        raise ValueError(
+            "Rainfall model does not contain "
+            "feature metadata."
+        )
+
+    missing_features = [
+        column
+        for column in features
+        if column not in latest.index
+    ]
+
+    if missing_features:
+
+        raise ValueError(
+            "Missing rainfall model features: "
+            + ", ".join(missing_features)
+        )
+
+    X = latest[
+        features
+    ].to_frame().T
+
+    # --------------------------------------------------------
+    # Prediction
+    # --------------------------------------------------------
+
     prediction = model.predict(X)[0]
 
-    # Rainfall cannot physically be negative.
+    # Rainfall cannot be negative.
     prediction = max(
         0.0,
         float(prediction),
     )
+
+    # --------------------------------------------------------
+    # Response
+    # --------------------------------------------------------
 
     return {
         "location_code": location_code,
@@ -125,4 +205,5 @@ def predict_next_hour_rainfall(
             prediction,
             3,
         ),
+        "model": "Random Forest",
     }
