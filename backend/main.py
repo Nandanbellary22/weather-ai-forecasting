@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.routes import (
     forecasts,
+    mrc_forecasts,
     pctt,
     rainfall,
     stations,
@@ -30,6 +31,7 @@ app.add_middleware(
 
 app.include_router(stations.router)
 app.include_router(forecasts.router)
+app.include_router(mrc_forecasts.router)
 app.include_router(pctt.router)
 app.include_router(weather.router)
 app.include_router(rainfall.router)
@@ -46,5 +48,5 @@ def root():
 @app.get("/health")
 def health():
     return {
-        "status": "ok"
+        "status": "ok",
     }

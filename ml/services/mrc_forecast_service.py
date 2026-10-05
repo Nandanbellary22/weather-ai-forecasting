@@ -57,10 +57,32 @@ DEFAULT_STATIONS = [
     "902601",
 ]
 
+# Best-performing model from the controlled MRC experiment.
+# These are intentionally station-specific because the benchmark
+# showed different models performing best at different stations.
+BEST_MODELS = {
+    "019803": {
+        "model": "linear_regression",
+        "feature_set": "water_level_only",
+    },
+    "019804": {
+        "model": "random_forest",
+        "feature_set": "water_level_only",
+    },
+    "039801": {
+        "model": "linear_regression",
+        "feature_set": "water_level_only",
+    },
+    "902601": {
+        "model": "random_forest",
+        "feature_set": "water_level_only",
+    },
+}
+
 
 def load_feature_data() -> pd.DataFrame:
     """
-    Load the continuity-aware MRC hourly feature dataset.
+    Load and validate the MRC hourly feature dataset.
     """
 
     if not FEATURE_FILE.exists():
@@ -154,8 +176,7 @@ def prepare_station_data(
     feature_columns: list[str],
 ) -> pd.DataFrame:
     """
-    Select one station and retain rows containing
-    all features required by the selected experiment.
+    Prepare valid historical rows for one station.
     """
 
     station_id = str(station_id).zfill(6)
@@ -198,11 +219,9 @@ def prepare_station_data(
     return station_df
 
 
-def create_model(
-    model_type: str,
-):
+def create_model(model_type: str):
     """
-    Create the requested regression model.
+    Create an ML model.
     """
 
     if model_type == "linear_regression":
@@ -219,6 +238,26 @@ def create_model(
         "Unsupported model type. "
         "Use 'linear_regression' or "
         "'random_forest'."
+    )
+
+
+def get_feature_columns(
+    feature_set: str,
+) -> list[str]:
+    """
+    Return feature columns for a feature set.
+    """
+
+    if feature_set == "water_level_only":
+        return WATER_LEVEL_FEATURES.copy()
+
+    if feature_set == "water_level_plus_rainfall":
+        return WATER_LEVEL_PLUS_RAINFALL_FEATURES.copy()
+
+    raise ValueError(
+        "Unsupported feature set. "
+        "Use 'water_level_only' or "
+        "'water_level_plus_rainfall'."
     )
 
 
@@ -321,20 +360,9 @@ def evaluate_model(
 
     station_id = str(station_id).zfill(6)
 
-    if feature_set == "water_level_only":
-        feature_columns = WATER_LEVEL_FEATURES
-
-    elif feature_set == "water_level_plus_rainfall":
-        feature_columns = (
-            WATER_LEVEL_PLUS_RAINFALL_FEATURES
-        )
-
-    else:
-        raise ValueError(
-            "Unsupported feature set. "
-            "Use 'water_level_only' or "
-            "'water_level_plus_rainfall'."
-        )
+    feature_columns = get_feature_columns(
+        feature_set
+    )
 
     station_df = prepare_station_data(
         df,
@@ -508,6 +536,252 @@ def run_controlled_experiment(
         )
 
     return experiment_df
+
+
+def get_best_model_config(
+    station_id: str,
+) -> dict:
+    """
+    Return the validated model configuration for a station.
+    """
+
+    station_id = str(station_id).zfill(6)
+
+    if station_id not in BEST_MODELS:
+        supported = ", ".join(
+            sorted(BEST_MODELS.keys())
+        )
+
+        raise ValueError(
+            f"No validated MRC forecasting model is "
+            f"configured for station {station_id}. "
+            f"Currently supported stations: {supported}"
+        )
+
+    return BEST_MODELS[station_id].copy()
+
+
+def train_production_model(
+    station_id: str,
+    df: pd.DataFrame,
+):
+    """
+    Train the validated production model using all
+    available historical rows for the station.
+
+    The model is trained only after the controlled
+    experiment has identified the model/feature set.
+    """
+
+    station_id = str(station_id).zfill(6)
+
+    config = get_best_model_config(
+        station_id
+    )
+
+    model_type = config["model"]
+    feature_set = config["feature_set"]
+
+    feature_columns = get_feature_columns(
+        feature_set
+    )
+
+    station_df = prepare_station_data(
+        df,
+        station_id,
+        feature_columns,
+    )
+
+    X_train = station_df[
+        feature_columns
+    ]
+
+    y_train = station_df[
+        TARGET_COLUMN
+    ]
+
+    model = create_model(
+        model_type
+    )
+
+    model.fit(
+        X_train,
+        y_train,
+    )
+
+    return (
+        model,
+        station_df,
+        feature_columns,
+        config,
+    )
+
+
+def get_validation_metrics(
+    station_id: str,
+    df: pd.DataFrame,
+) -> dict:
+    """
+    Re-run the station's selected model using the same
+    chronological 80/20 validation strategy used in the
+    controlled experiment.
+
+    This provides validation metrics alongside the
+    production forecast.
+    """
+
+    station_id = str(station_id).zfill(6)
+
+    config = get_best_model_config(
+        station_id
+    )
+
+    feature_columns = get_feature_columns(
+        config["feature_set"]
+    )
+
+    station_df = prepare_station_data(
+        df,
+        station_id,
+        feature_columns,
+    )
+
+    split_index = int(
+        len(station_df) * 0.80
+    )
+
+    if split_index <= 0 or split_index >= len(station_df):
+        raise ValueError(
+            f"Unable to create validation split for "
+            f"station {station_id}."
+        )
+
+    train_df = station_df.iloc[
+        :split_index
+    ].copy()
+
+    test_df = station_df.iloc[
+        split_index:
+    ].copy()
+
+    model = create_model(
+        config["model"]
+    )
+
+    model.fit(
+        train_df[feature_columns],
+        train_df[TARGET_COLUMN],
+    )
+
+    predictions = model.predict(
+        test_df[feature_columns]
+    )
+
+    mae, rmse = calculate_metrics(
+        test_df[TARGET_COLUMN],
+        predictions,
+    )
+
+    return {
+        "mae": mae,
+        "rmse": rmse,
+        "train_rows": int(len(train_df)),
+        "test_rows": int(len(test_df)),
+        "validation_start": test_df["hour"].min(),
+        "validation_end": test_df["hour"].max(),
+    }
+
+
+def forecast_next_hour(
+    station_id: str,
+) -> dict:
+    """
+    Generate a one-hour-ahead MRC water-level forecast.
+
+    The selected station-specific model is trained on all
+    valid historical feature rows, then the latest available
+    feature row is used to predict the next hour.
+
+    TARGET_COLUMN is never used as an input feature.
+    """
+
+    station_id = str(station_id).zfill(6)
+
+    df = load_feature_data()
+
+    config = get_best_model_config(
+        station_id
+    )
+
+    model, station_df, feature_columns, _ = (
+        train_production_model(
+            station_id=station_id,
+            df=df,
+        )
+    )
+
+    latest_row = (
+        station_df
+        .sort_values("hour")
+        .iloc[-1]
+    )
+
+    latest_features = latest_row[
+        feature_columns
+    ]
+
+    if latest_features.isna().any():
+        missing_features = (
+            latest_features[
+                latest_features.isna()
+            ]
+            .index
+            .tolist()
+        )
+
+        raise ValueError(
+            f"Latest MRC feature row for station "
+            f"{station_id} is missing required features: "
+            f"{missing_features}"
+        )
+
+    prediction = model.predict(
+        pd.DataFrame(
+            [latest_features.to_dict()]
+        )
+    )[0]
+
+    forecast_timestamp = (
+        latest_row["hour"]
+        + pd.Timedelta(hours=1)
+    )
+
+    validation = get_validation_metrics(
+        station_id=station_id,
+        df=df,
+    )
+
+    return {
+        "station_id": station_id,
+        "model": config["model"],
+        "feature_set": config["feature_set"],
+        "forecast_timestamp": forecast_timestamp,
+        "predicted_water_level": float(prediction),
+        "latest_observation_timestamp": latest_row["hour"],
+        "latest_water_level": float(
+            latest_row["water_level"]
+        ),
+        "validation_mae": validation["mae"],
+        "validation_rmse": validation["rmse"],
+        "train_rows": validation["train_rows"],
+        "test_rows": validation["test_rows"],
+        "validation_start": validation[
+            "validation_start"
+        ],
+        "validation_end": validation[
+            "validation_end"
+        ],
+    }
 
 
 def print_experiment_results(
@@ -798,3 +1072,58 @@ if __name__ == "__main__":
     print_feature_importance(
         experiment
     )
+
+    print()
+    print("=" * 90)
+    print("PRODUCTION FORECAST TEST")
+    print("=" * 90)
+
+    for station_id in DEFAULT_STATIONS:
+
+        try:
+            result = forecast_next_hour(
+                station_id
+            )
+
+            print()
+            print(
+                f"Station: {result['station_id']}"
+            )
+            print(
+                f"Model: {result['model']}"
+            )
+            print(
+                f"Feature set: "
+                f"{result['feature_set']}"
+            )
+            print(
+                f"Latest observation: "
+                f"{result['latest_observation_timestamp']}"
+            )
+            print(
+                f"Latest water level: "
+                f"{result['latest_water_level']:.6f}"
+            )
+            print(
+                f"Forecast timestamp: "
+                f"{result['forecast_timestamp']}"
+            )
+            print(
+                f"Predicted water level: "
+                f"{result['predicted_water_level']:.6f}"
+            )
+            print(
+                f"Validation MAE: "
+                f"{result['validation_mae']:.6f}"
+            )
+            print(
+                f"Validation RMSE: "
+                f"{result['validation_rmse']:.6f}"
+            )
+
+        except Exception as exc:
+            print()
+            print(
+                f"Forecast failed for "
+                f"{station_id}: {exc}"
+            )
