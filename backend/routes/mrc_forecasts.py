@@ -1,13 +1,86 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
-from backend.schemas import MRCForecastResponse
+from backend.schemas import (
+    MRCForecastResponse,
+    MRCObservation,
+    MRCStationSummary,
+)
+from backend.services.mrc_service import (
+    get_mrc_station_history,
+    get_mrc_stations,
+)
 from ml.services.mrc_forecast_service import forecast_next_hour
 
 
 router = APIRouter(
     prefix="/mrc",
-    tags=["MRC Forecasts"],
+    tags=["MRC"],
 )
+
+
+@router.get(
+    "/stations",
+    response_model=list[MRCStationSummary],
+)
+def get_mrc_station_list() -> list[MRCStationSummary]:
+    """
+    Return all Vietnam MRC stations and their latest
+    telemetry snapshot.
+    """
+
+    try:
+        results = get_mrc_stations()
+
+        return [
+            MRCStationSummary(**station)
+            for station in results
+        ]
+
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=str(exc),
+        ) from exc
+
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=str(exc),
+        ) from exc
+
+
+@router.get(
+    "/stations/{station_id}/history",
+    response_model=list[MRCObservation],
+)
+def get_mrc_station_history_route(
+    station_id: str,
+    limit: int = Query(
+        default=168,
+        ge=1,
+        le=1000,
+    ),
+) -> list[MRCObservation]:
+    """
+    Return chronological MRC observations for one station.
+    """
+
+    try:
+        results = get_mrc_station_history(
+            station_id=station_id,
+            limit=limit,
+        )
+
+        return [
+            MRCObservation(**observation)
+            for observation in results
+        ]
+
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=str(exc),
+        ) from exc
 
 
 @router.get(

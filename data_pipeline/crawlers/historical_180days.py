@@ -6,15 +6,43 @@ import pandas as pd
 from data_pipeline.crawlers.hydrology_api import fetch_station_data
 
 
+# All confirmed hydrology stations.
 STATION_IDS = [
     "553000",
     "553100",
     "553200",
     "553300",
     "553400",
+    "553800",
+    "553900",
+    "554000",
+    "554100",
+    "554200",
+    "554300",
+    "554400",
+    "554500",
+    "554600",
+    "554700",
+    "554800",
+    "554900",
+    "555000",
+    "555100",
+    "555200",
+    "555300",
+    "555400",
+    "555500",
+    "555800",
+    "555900",
+    "556100",
+    "557600",
+    "559200",
 ]
 
 DAYS = 180
+
+# Keep the same historical period used by the existing dataset
+# so previous experiments remain comparable.
+END_DATE = date(2026, 7, 13)
 
 OUTPUT_DIR = Path("data/processed")
 OUTPUT_FILE = OUTPUT_DIR / "historical_180days_all_stations.csv"
@@ -25,86 +53,43 @@ def collect_station(
     start_date: date,
     end_date: date,
 ) -> pd.DataFrame:
+    """
+    Collect the complete historical period for one station.
 
-    records = []
-    failed_dates = []
+    The hydrology API supports requesting the full period in one call,
+    so we avoid making one API request per day.
+    """
 
-    current_date = start_date
+    start_time = f"{start_date.isoformat()} 00:00"
+    end_time = f"{end_date.isoformat()} 23:59"
 
-    while current_date <= end_date:
+    print(
+        f"Collecting {station_id} | "
+        f"{start_date} -> {end_date}"
+    )
 
-        date_str = current_date.isoformat()
-
-        start_time = f"{date_str} 00:00"
-        end_time = f"{date_str} 23:59"
-
-        print(f"{station_id} | {date_str}")
-
-        try:
-            df = fetch_station_data(
-                station_id=station_id,
-                start_time=start_time,
-                end_time=end_time,
-            )
-
-            if df is not None and not df.empty:
-
-                df["station_id"] = station_id
-
-                records.append(df)
-
-            else:
-
-                print(f"  NO DATA: {station_id} {date_str}")
-                failed_dates.append(date_str)
-
-        except Exception as exc:
-
-            print(
-                f"  ERROR: {station_id} {date_str} -> {exc}"
-            )
-
-            failed_dates.append(date_str)
-
-        current_date += timedelta(days=1)
-
-    if records:
-
-        result = pd.concat(
-            records,
-            ignore_index=True,
+    try:
+        df = fetch_station_data(
+            station_id=station_id,
+            start_time=start_time,
+            end_time=end_time,
         )
 
-    else:
+    except Exception as exc:
+        print(
+            f"  ERROR: {station_id} -> {exc}"
+        )
+        return pd.DataFrame()
 
-        result = pd.DataFrame()
+    if df is None or df.empty:
+        print(
+            f"  NO DATA: {station_id}"
+        )
+        return pd.DataFrame()
 
-    print()
-    print(f"Station {station_id} summary")
-    print(f"Rows collected: {len(result)}")
-    print(f"Failed dates: {len(failed_dates)}")
+    df = df.copy()
 
-    if failed_dates:
-
-        print("Failed dates:")
-
-        for failed_date in failed_dates:
-            print(f"  {failed_date}")
-
-    return result
-
-
-def validate_dataset(df: pd.DataFrame) -> None:
-
-    print()
-    print("=" * 60)
-    print("FINAL DATASET VALIDATION")
-    print("=" * 60)
-
-    if df.empty:
-
-        print("Dataset is empty.")
-        return
+    df["station_id"] = station_id
 
     df["timestamp"] = pd.to_datetime(
         df["timestamp"],
@@ -116,23 +101,220 @@ def validate_dataset(df: pd.DataFrame) -> None:
         errors="coerce",
     )
 
-    print(f"Rows: {len(df)}")
-    print(f"Stations: {df['station_id'].nunique()}")
-    print(f"Start: {df['timestamp'].min()}")
-    print(f"End: {df['timestamp'].max()}")
+    df = df[
+        [
+            "station_id",
+            "timestamp",
+            "value",
+        ]
+    ]
+
+    df = (
+        df.dropna(subset=["timestamp"])
+        .sort_values("timestamp")
+        .drop_duplicates(
+            subset=["station_id", "timestamp"]
+        )
+        .reset_index(drop=True)
+    )
+
+    print(
+        f"  Rows: {len(df)}"
+    )
+
+    print(
+        f"  Start: {df['timestamp'].min()}"
+    )
+
+    print(
+        f"  End:   {df['timestamp'].max()}"
+    )
+
+    return df
+
+
+def validate_station(
+    df: pd.DataFrame,
+    station_id: str,
+    start_date: date,
+    end_date: date,
+) -> None:
+    """
+    Validate one station's historical coverage.
+    """
+
+    print()
+    print(
+        f"Validation: {station_id}"
+    )
+    print("-" * 60)
+
+    expected_rows = DAYS * 24
+
+    actual_rows = len(df)
+
+    print(
+        f"Expected rows: {expected_rows}"
+    )
+
+    print(
+        f"Actual rows:   {actual_rows}"
+    )
+
+    print(
+        f"Difference:    {actual_rows - expected_rows}"
+    )
+
+    if actual_rows == expected_rows:
+        print("Coverage:       COMPLETE")
+    else:
+        print("Coverage:       INCOMPLETE")
+
+    if df.empty:
+        print("Status:         NO DATA")
+        return
+
+    duplicate_count = df.duplicated(
+        subset=[
+            "station_id",
+            "timestamp",
+        ]
+    ).sum()
+
+    print(
+        f"Duplicates:     {duplicate_count}"
+    )
+
+    missing_timestamps = df["timestamp"].isna().sum()
+
+    missing_values = df["value"].isna().sum()
+
+    print(
+        f"Missing time:   {missing_timestamps}"
+    )
+
+    print(
+        f"Missing value:  {missing_values}"
+    )
+
+    unique_days = (
+        df["timestamp"]
+        .dt.date
+        .nunique()
+    )
+
+    print(
+        f"Available days: {unique_days}/{DAYS}"
+    )
+
+    expected_start = pd.Timestamp(
+        start_date
+    )
+
+    expected_end = pd.Timestamp(
+        end_date
+    )
+
+    actual_start = df["timestamp"].min()
+    actual_end = df["timestamp"].max()
+
+    print(
+        f"Expected start: {expected_start}"
+    )
+
+    print(
+        f"Actual start:   {actual_start}"
+    )
+
+    print(
+        f"Expected end:   {expected_end}"
+    )
+
+    print(
+        f"Actual end:     {actual_end}"
+    )
+
+
+def validate_dataset(
+    df: pd.DataFrame,
+    start_date: date,
+    end_date: date,
+) -> None:
+    """
+    Perform final validation across all stations.
+    """
+
+    print()
+    print("=" * 70)
+    print("FINAL 180-DAY HYDROLOGY DATASET VALIDATION")
+    print("=" * 70)
+
+    if df.empty:
+        print("Dataset is empty.")
+        return
+
+    expected_rows_per_station = DAYS * 24
+
+    expected_total_rows = (
+        expected_rows_per_station
+        * len(STATION_IDS)
+    )
+
+    print(
+        f"Rows:              {len(df)}"
+    )
+
+    print(
+        f"Expected rows:     {expected_total_rows}"
+    )
+
+    print(
+        f"Difference:        "
+        f"{len(df) - expected_total_rows}"
+    )
+
+    print(
+        f"Stations:           "
+        f"{df['station_id'].nunique()}"
+    )
+
+    print(
+        f"Expected stations:  "
+        f"{len(STATION_IDS)}"
+    )
+
+    print(
+        f"Start:              "
+        f"{df['timestamp'].min()}"
+    )
+
+    print(
+        f"End:                "
+        f"{df['timestamp'].max()}"
+    )
 
     print()
     print("Rows by station:")
-
     print(
-        df.groupby("station_id").size()
+        df.groupby("station_id")
+        .size()
+        .sort_index()
+        .to_string()
     )
 
     print()
     print("Missing values:")
-
     print(
-        df.isna().sum()
+        df[
+            [
+                "station_id",
+                "timestamp",
+                "value",
+            ]
+        ]
+        .isna()
+        .sum()
+        .to_string()
     )
 
     print()
@@ -156,9 +338,12 @@ def validate_dataset(df: pd.DataFrame) -> None:
         )
         .groupby("station_id")["date"]
         .nunique()
+        .sort_index()
     )
 
-    print(days_per_station)
+    print(
+        days_per_station.to_string()
+    )
 
     print()
     print("Rows per station per day:")
@@ -168,55 +353,78 @@ def validate_dataset(df: pd.DataFrame) -> None:
             date=df["timestamp"].dt.date
         )
         .groupby(
-            ["station_id", "date"]
+            [
+                "station_id",
+                "date",
+            ]
         )
         .size()
     )
 
-    print(daily_counts.describe())
+    print(
+        daily_counts.describe()
+    )
 
     print()
-    print("Rows per station:")
+    print("Stations with incomplete coverage:")
 
-    print(
+    station_counts = (
         df.groupby("station_id")
         .size()
-        .sort_index()
+    )
+
+    incomplete = station_counts[
+        station_counts != expected_rows_per_station
+    ]
+
+    if incomplete.empty:
+        print("None")
+    else:
+        print(
+            incomplete.sort_index().to_string()
+        )
+
+    print()
+    print("Expected date range:")
+    print(
+        f"{start_date} -> {end_date}"
     )
 
 
 def main() -> None:
 
-    # Keep the same end date used by our previous
-    # 90-day dataset so the experiments remain comparable.
-    end_date = date(2026, 7, 13)
-
     start_date = (
-        end_date
+        END_DATE
         - timedelta(days=DAYS - 1)
     )
 
-    print("=" * 60)
+    print("=" * 70)
     print("180-DAY HISTORICAL HYDROLOGY COLLECTION")
-    print("=" * 60)
-
-    print(f"Start date: {start_date}")
-    print(f"End date:   {end_date}")
+    print("=" * 70)
 
     print(
-        f"Stations:   {', '.join(STATION_IDS)}"
+        f"Start date:          {start_date}"
     )
 
     print(
-        f"Expected days/station: {DAYS}"
+        f"End date:            {END_DATE}"
     )
 
     print(
-        f"Expected rows/station: {DAYS * 24}"
+        f"Stations:             {len(STATION_IDS)}"
     )
 
     print(
-        f"Expected total rows: "
+        f"Expected days:        {DAYS}"
+    )
+
+    print(
+        f"Expected rows/station:"
+        f" {DAYS * 24}"
+    )
+
+    print(
+        f"Expected total rows:  "
         f"{DAYS * 24 * len(STATION_IDS)}"
     )
 
@@ -229,17 +437,25 @@ def main() -> None:
         station_df = collect_station(
             station_id=station_id,
             start_date=start_date,
-            end_date=end_date,
+            end_date=END_DATE,
         )
 
-        if not station_df.empty:
+        if station_df.empty:
+            continue
 
-            all_data.append(
-                station_df
-            )
+        validate_station(
+            df=station_df,
+            station_id=station_id,
+            start_date=start_date,
+            end_date=END_DATE,
+        )
+
+        all_data.append(
+            station_df
+        )
 
     if not all_data:
-
+        print()
         print("No data collected.")
         return
 
@@ -268,6 +484,18 @@ def main() -> None:
 
     combined = (
         combined
+        .dropna(
+            subset=[
+                "station_id",
+                "timestamp",
+            ]
+        )
+        .drop_duplicates(
+            subset=[
+                "station_id",
+                "timestamp",
+            ]
+        )
         .sort_values(
             [
                 "station_id",
@@ -277,7 +505,11 @@ def main() -> None:
         .reset_index(drop=True)
     )
 
-    validate_dataset(combined)
+    validate_dataset(
+        df=combined,
+        start_date=start_date,
+        end_date=END_DATE,
+    )
 
     OUTPUT_DIR.mkdir(
         parents=True,
@@ -290,13 +522,21 @@ def main() -> None:
     )
 
     print()
-    print("=" * 60)
+    print("=" * 70)
     print("SAVED")
-    print("=" * 60)
+    print("=" * 70)
 
-    print(OUTPUT_FILE)
+    print(
+        f"File: {OUTPUT_FILE}"
+    )
+
     print(
         f"Final rows: {len(combined)}"
+    )
+
+    print(
+        f"Final stations: "
+        f"{combined['station_id'].nunique()}"
     )
 
 

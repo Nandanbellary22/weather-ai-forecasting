@@ -44,7 +44,7 @@ def get_connection():
 def main():
 
     print("=" * 70)
-    print("WEATHER DATA → POSTGRESQL IMPORT")
+    print("WEATHER DATA -> POSTGRESQL IMPORT")
     print("=" * 70)
 
     print(f"Input file: {INPUT_FILE}")
@@ -76,10 +76,15 @@ def main():
         "timestamp",
         "temperature_2m",
         "relative_humidity_2m",
+        "dew_point_2m",
         "precipitation",
+        "rain",
+        "pressure_msl",
         "surface_pressure",
         "cloud_cover",
         "wind_speed_10m",
+        "wind_direction_10m",
+        "wind_gusts_10m",
     ]
 
     missing_columns = [
@@ -94,7 +99,7 @@ def main():
         )
 
     # -----------------------------------------------------
-    # Keep only fields required by PostgreSQL
+    # Keep all weather fields required by PostgreSQL
     # -----------------------------------------------------
 
     df = df[
@@ -105,10 +110,15 @@ def main():
             "timestamp",
             "temperature_2m",
             "relative_humidity_2m",
+            "dew_point_2m",
             "precipitation",
+            "rain",
+            "pressure_msl",
             "surface_pressure",
             "cloud_cover",
             "wind_speed_10m",
+            "wind_direction_10m",
+            "wind_gusts_10m",
         ]
     ].copy()
 
@@ -139,11 +149,16 @@ def main():
 
     numeric_columns = [
         "temperature_2m",
-        "precipitation_mm",
         "relative_humidity_2m",
+        "dew_point_2m",
+        "precipitation_mm",
+        "rain",
+        "pressure_msl",
         "surface_pressure_hpa",
-        "wind_speed_10m",
         "cloud_cover",
+        "wind_speed_10m",
+        "wind_direction_10m",
+        "wind_gusts_10m",
         "latitude",
         "longitude",
     ]
@@ -208,7 +223,7 @@ def main():
     )
     print(
         f"Time range     : "
-        f"{df['timestamp'].min()} → "
+        f"{df['timestamp'].min()} -> "
         f"{df['timestamp'].max()}"
     )
 
@@ -224,7 +239,7 @@ def main():
     print("Connected successfully.")
 
     # -----------------------------------------------------
-    # Insert SQL
+    # Insert / update SQL
     # -----------------------------------------------------
 
     insert_sql = """
@@ -238,7 +253,12 @@ def main():
             wind_speed_10m,
             cloud_cover,
             latitude,
-            longitude
+            longitude,
+            dew_point_2m,
+            rain,
+            pressure_msl,
+            wind_direction_10m,
+            wind_gusts_10m
         )
         VALUES %s
         ON CONFLICT (location_code, timestamp)
@@ -250,7 +270,12 @@ def main():
             wind_speed_10m = EXCLUDED.wind_speed_10m,
             cloud_cover = EXCLUDED.cloud_cover,
             latitude = EXCLUDED.latitude,
-            longitude = EXCLUDED.longitude
+            longitude = EXCLUDED.longitude,
+            dew_point_2m = EXCLUDED.dew_point_2m,
+            rain = EXCLUDED.rain,
+            pressure_msl = EXCLUDED.pressure_msl,
+            wind_direction_10m = EXCLUDED.wind_direction_10m,
+            wind_gusts_10m = EXCLUDED.wind_gusts_10m
     """
 
     # -----------------------------------------------------
@@ -292,6 +317,11 @@ def main():
                     row.cloud_cover,
                     row.latitude,
                     row.longitude,
+                    row.dew_point_2m,
+                    row.rain,
+                    row.pressure_msl,
+                    row.wind_direction_10m,
+                    row.wind_gusts_10m,
                 )
                 for row in chunk.itertuples(
                     index=False
@@ -353,7 +383,7 @@ def main():
     )
     print(
         f"Time range     : "
-        f"{df['timestamp'].min()} → "
+        f"{df['timestamp'].min()} -> "
         f"{df['timestamp'].max()}"
     )
     print(f"Source         : {SOURCE}")

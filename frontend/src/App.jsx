@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 
 
 
@@ -194,6 +194,7 @@ function MapCenter({ location }) {
 function App() {
 
   const [mode, setMode] = useState("weather");
+  const [weatherMetric, setWeatherMetric] = useState("temperature");
 
 
 
@@ -268,6 +269,14 @@ function App() {
           timestamp: item.timestamp,
           currentTemperature: item.temperature_c,
           currentRainfall: item.rainfall_mm,
+          humidity: item.relative_humidity_2m ?? item.humidity,
+          dewPoint: item.dew_point_2m ?? item.dew_point,
+          pressure: item.pressure_msl ?? item.surface_pressure,
+          surfacePressure: item.surface_pressure,
+          windSpeed: item.wind_speed_10m ?? item.wind_speed,
+          windDirection: item.wind_direction_10m ?? item.wind_direction,
+          windGusts: item.wind_gusts_10m ?? item.wind_gusts,
+          cloudCover: item.cloud_cover,
         }))
         .filter(
           (item) => Number.isFinite(item.latitude) && Number.isFinite(item.longitude)
@@ -666,6 +675,27 @@ function App() {
 
 
 
+  function getStationStats() {
+    const values = stationHistory
+      .map((item) => Number(item.value))
+      .filter((value) => Number.isFinite(value));
+
+    if (!values.length) {
+      return { latest: null, previous: null, change: null, min: null, max: null };
+    }
+
+    const latest = values[values.length - 1];
+    const previous = values.length > 1 ? values[values.length - 2] : null;
+
+    return {
+      latest,
+      previous,
+      change: previous === null ? null : latest - previous,
+      min: Math.min(...values),
+      max: Math.max(...values),
+    };
+  }
+
   function getHydroValue(
 
     reservoirId,
@@ -705,6 +735,29 @@ function App() {
   }
 
 
+
+  function getWeatherMetricValue(location) {
+    return weatherMetric === "rainfall"
+      ? Number(location.currentRainfall)
+      : Number(location.currentTemperature);
+  }
+
+  function getWeatherMarkerColor(location) {
+    const value = getWeatherMetricValue(location);
+    if (!Number.isFinite(value)) return "#64748b";
+    if (weatherMetric === "rainfall") {
+      if (value <= 0) return "#60a5fa";
+      if (value < 1) return "#38bdf8";
+      if (value < 5) return "#22c55e";
+      if (value < 15) return "#f59e0b";
+      return "#dc2626";
+    }
+    if (value < 10) return "#2563eb";
+    if (value < 18) return "#06b6d4";
+    if (value < 24) return "#22c55e";
+    if (value < 30) return "#f59e0b";
+    return "#dc2626";
+  }
 
   function formatValue(
 
@@ -765,32 +818,10 @@ function App() {
 
 
       <header className="header">
-
-
-
         <div>
-
-          <h1>
-
-            Vietnam Hydrometeorological
-
-            Forecasting WebGIS
-
-          </h1>
-
-
-
-          <p>
-
-            Multi-source data • Machine Learning •
-
-            Weather &amp; Hydrology
-
-          </p>
-
+          <h1>Vietnam Weather</h1>
+          <p>Weather conditions and forecasts across Vietnam</p>
         </div>
-
-
 
         <div className="mode-buttons">
 
@@ -867,22 +898,35 @@ function App() {
           {mode === "weather" && (
             <div
               style={{
-                position: "absolute",
-                top: 12,
-                left: 12,
-                zIndex: 1000,
-                background: "rgba(255,255,255,0.94)",
-                padding: "8px 12px",
-                borderRadius: 8,
-                boxShadow: "0 2px 8px rgba(0,0,0,0.18)",
-                fontSize: 13,
-                fontWeight: 600,
+                position: "absolute", top: 12, left: 12, zIndex: 1000,
+                background: "rgba(255,255,255,0.96)", padding: "9px 11px",
+                borderRadius: 10, boxShadow: "0 3px 12px rgba(15,23,42,0.18)",
+                fontSize: 12, fontWeight: 600, minWidth: 185,
               }}
             >
-              {weatherLocationsLoading
-                ? "Loading 500 weather locations..."
-                : `Weather points: ${weatherLocations.length}`}
-              {weatherLocationsError ? " • API fallback" : ""}
+              <div style={{ marginBottom: "7px", color: "#334155", fontWeight: 700 }}>
+                Map layer
+              </div>
+              <div style={{ display: "flex", gap: "5px" }}>
+                {[
+                  ["temperature", "Temperature"],
+                  ["rainfall", "Rainfall"],
+                ].map(([metric, label]) => (
+                  <button
+                    key={metric}
+                    type="button"
+                    onClick={() => setWeatherMetric(metric)}
+                    style={{
+                      border: "1px solid #cbd5e1", borderRadius: "999px", padding: "4px 8px",
+                      background: weatherMetric === metric ? "#eff6ff" : "white",
+                      color: weatherMetric === metric ? "#1d4ed8" : "#475569",
+                      fontSize: "11px", fontWeight: 700, cursor: "pointer",
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
 
@@ -948,41 +992,26 @@ function App() {
 
                       location.code
 
-                        ? 9
+                        ? 10
 
-                        : 4
+                        : 7
 
                     }
 
                     pathOptions={{
 
                       color:
-
-                        selectedLocation?.code ===
-
-                        location.code
-
-                          ? "#dc2626"
-
-                          : "#2563eb",
-
-
+                        selectedLocation?.code === location.code
+                          ? "#111827"
+                          : getWeatherMarkerColor(location),
 
                       fillColor:
-
-                        selectedLocation?.code ===
-
-                        location.code
-
+                        selectedLocation?.code === location.code
                           ? "#ef4444"
+                          : getWeatherMarkerColor(location),
 
-                          : "#3b82f6",
-                      fillOpacity: 0.55,
-                      weight: 1,
-
-                      fillOpacity: 0.85,
-
-                      weight: 2,
+                      fillOpacity: selectedLocation?.code === location.code ? 0.95 : 0.65,
+                      weight: selectedLocation?.code === location.code ? 2 : 1,
 
                     }}
 
@@ -1015,7 +1044,7 @@ function App() {
                         ? `Rainfall: ${formatValue(location.currentRainfall, 2)} mm`
                         : "Rainfall: —"}
                       <br />
-                      Click for ML forecast.
+                      View forecast
                     </Popup>
 
 
@@ -1244,9 +1273,9 @@ function App() {
 
                 <p>
 
-                  Click a blue marker to view
+                  Select a location to view
 
-                  the machine-learning forecast.
+                  weather details and the next-hour forecast.
 
                 </p>
 
@@ -1272,7 +1301,7 @@ function App() {
 
                   <span>
 
-                    Selected location
+                    Weather conditions
 
                   </span>
 
@@ -1306,7 +1335,7 @@ function App() {
 
                   <div className="loading">
 
-                    Loading ML forecast...
+                    Loading forecast...
 
                   </div>
 
@@ -1338,168 +1367,44 @@ function App() {
 
                     <div className="forecast-content">
 
-
-
-                      <div className="forecast-card">
-
-
-
-                        <span>
-
-                          Current temperature
-
-                        </span>
-
-
-
-                        <strong>
-
-                          {
-
-                            temperature.current_temperature_c
-
-                          }
-
-                          °C
-
-                        </strong>
-
-
-
-                        <p>
-
-                          ML prediction — next hour
-
-                        </p>
-
-
-
-                        <div className="prediction-value">
-
-                          {
-
-                            temperature.predicted_next_hour_temperature_c
-
-                          }
-
-                          °C
-
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "10px", marginBottom: "12px" }}>
+                        <div className="forecast-card">
+                          <span>Latest temperature</span>
+                          <strong>{temperature.current_temperature_c}°C</strong>
+                          <p>Next hour forecast</p>
+                          <div className="prediction-value">{temperature.predicted_next_hour_temperature_c}°C</div>
                         </div>
-
-
-
-                      </div>
-
-
-
-                      <div className="forecast-card rainfall-card">
-
-
-
-                        <span>
-
-                          Current rainfall
-
-                        </span>
-
-
-
-                        <strong>
-
-                          {
-
-                            rainfall.current_rainfall_mm
-
-                          }{" "}
-
-                          mm
-
-                        </strong>
-
-
-
-                        <p>
-
-                          ML prediction — next hour
-
-                        </p>
-
-
-
-                        <div className="prediction-value">
-
-                          {
-
-                            rainfall.predicted_next_hour_rainfall_mm
-
-                          }{" "}
-
-                          mm
-
+                        <div className="forecast-card rainfall-card">
+                          <span>Latest rainfall</span>
+                          <strong>{rainfall.current_rainfall_mm} mm</strong>
+                          <p>Next hour forecast</p>
+                          <div className="prediction-value">{rainfall.predicted_next_hour_rainfall_mm} mm</div>
                         </div>
-
-
-
                       </div>
 
-
-
-                      <div className="model-info">
-
-
-
-                        <strong>
-
-                          Machine-learning models
-
-                        </strong>
-
-
-
-                        <p>
-
-                          Temperature: Random Forest
-
-                        </p>
-
-
-
-                        <p>
-
-                          Rainfall: Random Forest
-
-                        </p>
-
-
-
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "10px" }}>
+                        {[
+                          ["Humidity", selectedLocation.humidity, "%"],
+                          ["Wind speed", selectedLocation.windSpeed, "km/h"],
+                          ["Wind gusts", selectedLocation.windGusts, "km/h"],
+                          ["Pressure", selectedLocation.pressure, "hPa"],
+                          ["Cloud cover", selectedLocation.cloudCover, "%"],
+                          ["Dew point", selectedLocation.dewPoint, "°C"],
+                          ["Wind direction", selectedLocation.windDirection, "°"],
+                        ].map(([label, value, unit]) => (
+                          <div key={label} className="hydro-card" style={{ margin: 0 }}>
+                            <span>{label}</span>
+                            <strong>{value === null || value === undefined || Number.isNaN(Number(value)) ? "—" : `${formatValue(value, 1)} ${unit}`}</strong>
+                          </div>
+                        ))}
                       </div>
 
-
-
-                      <div className="timestamp">
-
-
-
-                        Data timestamp:
-
+                      <div className="timestamp" style={{ marginTop: "12px" }}>
+                        Latest available observation:
                         <br />
-
-
-
-                        {new Date(
-
-                          temperature.timestamp
-
-                        ).toLocaleString()}
-
-
-
+                        {new Date(temperature.timestamp).toLocaleString()}
                       </div>
-
-
-
                     </div>
-
                   )}
 
 
@@ -1867,273 +1772,66 @@ function App() {
 
 
                   {!stationHistoryLoading &&
-
                     !stationHistoryError &&
-
                     stationHistory.length > 0 && (
-
                       <>
-
-
-
-                        <div className="hydro-card">
-
-
-
-                          <span>
-
-                            Latest station value
-
-                          </span>
-
-
-
-                          <strong>
-
-                            {formatValue(
-
-                              stationHistory[
-
-                                stationHistory.length - 1
-
-                              ]?.value
-
-                            )}
-
-                          </strong>
-
-
-
-                          <p>
-
-                            {new Date(
-
-                              stationHistory[
-
-                                stationHistory.length - 1
-
-                              ]?.timestamp
-
-                            ).toLocaleString()}
-
-                          </p>
-
-
-
-                        </div>
-
-
-
-                        <div
-
-                          style={{
-
-                            maxHeight: "280px",
-
-                            overflowY: "auto",
-
-                            marginTop: "12px",
-
-                          }}
-
-                        >
-
-
-
-                          <table
-
-                            style={{
-
-                              width: "100%",
-
-                              borderCollapse:
-
-                                "collapse",
-
-                              fontSize: "12px",
-
-                            }}
-
-                          >
-
-
-
-                            <thead>
-
-
-
-                              <tr>
-
-
-
-                                <th
-
-                                  style={{
-
-                                    textAlign:
-
-                                      "left",
-
-                                    padding:
-
-                                      "7px",
-
-                                    borderBottom:
-
-                                      "1px solid #d1d5db",
-
-                                  }}
-
-                                >
-
-                                  Timestamp
-
-                                </th>
-
-
-
-                                <th
-
-                                  style={{
-
-                                    textAlign:
-
-                                      "right",
-
-                                    padding:
-
-                                      "7px",
-
-                                    borderBottom:
-
-                                      "1px solid #d1d5db",
-
-                                  }}
-
-                                >
-
-                                  Value
-
-                                </th>
-
-
-
-                              </tr>
-
-
-
-                            </thead>
-
-
-
-                            <tbody>
-
-
-
-                              {stationHistory.map(
-
-                                (observation) => (
-
-
-
-                                  <tr
-
-                                    key={`${observation.station_id}-${observation.timestamp}`}
-
-                                  >
-
-
-
-                                    <td
-
-                                      style={{
-
-                                        padding:
-
-                                          "7px",
-
-                                        borderBottom:
-
-                                          "1px solid #f1f5f9",
-
-                                      }}
-
-                                    >
-
-                                      {new Date(
-
-                                        observation.timestamp
-
-                                      ).toLocaleString()}
-
-                                    </td>
-
-
-
-                                    <td
-
-                                      style={{
-
-                                        padding:
-
-                                          "7px",
-
-                                        textAlign:
-
-                                          "right",
-
-                                        borderBottom:
-
-                                          "1px solid #f1f5f9",
-
-                                      }}
-
-                                    >
-
-                                      {formatValue(
-
-                                        observation.value
-
-                                      )}
-
-                                    </td>
-
-
-
-                                  </tr>
-
-
-
-                                )
-
-                              )}
-
-
-
-                            </tbody>
-
-
-
-                          </table>
-
-
-
-                        </div>
-
-
-
+                        {(() => {
+                          const stats = getStationStats();
+                          const latestObservation = stationHistory[stationHistory.length - 1];
+                          const trendUp = stats.change !== null && stats.change > 0;
+                          const trendDown = stats.change !== null && stats.change < 0;
+
+                          return (
+                            <>
+                              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "10px" }}>
+                                <div className="hydro-card" style={{ margin: 0 }}>
+                                  <span>Water level</span>
+                                  <strong>{formatValue(stats.latest)}</strong>
+                                  <p>{new Date(latestObservation.timestamp).toLocaleString()}</p>
+                                </div>
+                                <div className="hydro-card" style={{ margin: 0 }}>
+                                  <span>Change</span>
+                                  <strong>{stats.change === null ? "—" : `${stats.change > 0 ? "+" : ""}${formatValue(stats.change)}`}</strong>
+                                  <p>vs previous observation</p>
+                                </div>
+                                <div className="hydro-card" style={{ margin: 0 }}>
+                                  <span>24-hour minimum</span>
+                                  <strong>{formatValue(stats.min)}</strong>
+                                  <p>Recent station range</p>
+                                </div>
+                                <div className="hydro-card" style={{ margin: 0 }}>
+                                  <span>24-hour maximum</span>
+                                  <strong>{formatValue(stats.max)}</strong>
+                                  <p>Recent station range</p>
+                                </div>
+                              </div>
+
+                              <div style={{ marginTop: "14px", padding: "12px", borderRadius: "12px", background: "#f8fafc", border: "1px solid #e2e8f0" }}>
+                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                                  <strong style={{ fontSize: "13px", color: "#334155" }}>Recent water-level trend</strong>
+                                  <span style={{ fontSize: "12px", fontWeight: 700, color: trendUp ? "#15803d" : trendDown ? "#dc2626" : "#64748b" }}>{trendUp ? "Rising" : trendDown ? "Falling" : "Stable"}</span>
+                                </div>
+                                <div style={{ display: "flex", alignItems: "end", gap: "3px", height: "90px" }}>
+                                  {stationHistory.map((observation, index) => {
+                                    const value = Number(observation.value);
+                                    const span = stats.max - stats.min;
+                                    const height = span > 0 && Number.isFinite(value) ? 15 + ((value - stats.min) / span) * 65 : 35;
+                                    return <div key={`${observation.station_id}-${observation.timestamp}`} title={`${new Date(observation.timestamp).toLocaleString()} — ${formatValue(value)}`} style={{ flex: 1, minWidth: "2px", height: `${height}px`, borderRadius: "3px 3px 1px 1px", background: index === stationHistory.length - 1 ? "#2563eb" : "#93c5fd" }} />;
+                                  })}
+                                </div>
+                                <div style={{ marginTop: "8px", fontSize: "11px", color: "#64748b", display: "flex", justifyContent: "space-between" }}>
+                                  <span>{new Date(stationHistory[0].timestamp).toLocaleString()}</span>
+                                  <span>{new Date(latestObservation.timestamp).toLocaleString()}</span>
+                                </div>
+                              </div>
+                            </>
+                          );
+                        })()}
                       </>
-
                     )}
 
-
-
                 </div>
-
               )}
-
-
-
               {/* Existing PCTT reservoir panel */}
 
 
@@ -2559,5 +2257,3 @@ function App() {
 
 
 export default App;
-
-

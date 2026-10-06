@@ -66,5 +66,48 @@ class MRCForecastResponse(BaseModel):
     validation_end: datetime
 
 
+class MRCStationSummary(BaseModel):
+    station_id: str
+    station_name: str | None
+    latitude: float | None
+    longitude: float | None
+    river: str | None
+    country: str | None
+    station_type: str | None
+
+    water_level: float | None
+    rainfall: float | None
+    rainfall_1h: float | None
+    rainfall_6h: float | None
+    rainfall_12h: float | None
+    rainfall_24h: float | None
+    rainfall_7to7: float | None
+    temperature: float | None
+    battery: float | None
+
+    flood_stage: float | None
+    alarm_stage: float | None
+    mean_sea_level: float | None
+
+    water_level_sensor: bool
+    rainfall_sensor: bool
+    temperature_sensor: bool
+    battery_sensor: bool
+
+    success_rate: float | None
+    last_status: str | None
+    last_measurement: datetime | None
+    telemetry_available: bool
+
+
+class MRCObservation(BaseModel):
+    station_id: str
+    timestamp: datetime
+    water_level: float | None
+    rainfall: float | None
+    temperature: float | None
+    battery: float | None
+
+
 class HealthResponse(BaseModel):
     status: str
