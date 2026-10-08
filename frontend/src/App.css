@@ -313,6 +313,40 @@
   font-size: 13px;
 }
 
+.spatial-context {
+  margin-top: 20px;
+  padding: 16px;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.spatial-context h3 {
+  margin: 0 0 12px;
+  font-size: 16px;
+}
+
+.spatial-point, .spatial-grid > div {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 11px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: white;
+  font-size: 12px;
+}
+
+.spatial-point { margin-bottom: 9px; }
+.spatial-point strong { color: #334155; }
+.station-point { border-color: #a7f3d0; background: #f0fdf4; }
+.station-point em { color: #9a3412; font-style: normal; line-height: 1.4; }
+.spatial-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.spatial-grid span { color: #64748b; font-size: 10px; font-weight: 700; text-transform: uppercase; }
+.spatial-grid strong { overflow-wrap: anywhere; font-size: 12px; }
+.spatial-range { grid-column: 1 / -1; }
+.spatial-error { color: #b91c1c; font-size: 12px; line-height: 1.5; }
+
 @media (max-width: 900px) {
   .header {
     height: auto;

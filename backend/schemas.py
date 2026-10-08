@@ -109,5 +109,38 @@ class MRCObservation(BaseModel):
     battery: float | None
 
 
+class SpatialMRCResponse(BaseModel):
+    requested_latitude: float
+    requested_longitude: float
+
+    station_id: str
+    station_name: str | None
+
+    station_latitude: float
+    station_longitude: float
+
+    river: str | None
+    country: str | None
+    station_type: str | None
+
+    distance_km: float
+
+    water_level: float | None
+    rainfall: float | None
+    temperature: float | None
+    battery: float | None
+    latest_measurement: datetime | None
+
+    flood_stage: float | None
+    alarm_stage: float | None
+
+    discharge_available: bool
+    discharge_observations: int
+    discharge_first_date: object | None
+    discharge_last_date: object | None
+    minimum_discharge_m3s: float | None
+    maximum_discharge_m3s: float | None
+
+
 class HealthResponse(BaseModel):
     status: str

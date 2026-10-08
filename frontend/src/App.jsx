@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 
 
@@ -212,6 +212,10 @@ function App() {
   const [loading, setLoading] = useState(false);
 
   const [error, setError] = useState(null);
+  const [spatialProfile, setSpatialProfile] = useState(null);
+  const [spatialLoading, setSpatialLoading] = useState(false);
+  const [spatialError, setSpatialError] = useState(null);
+  const spatialRequestId = useRef(0);
 
 
 
@@ -300,6 +304,7 @@ function App() {
   }, []);
 
   async function loadWeather(location) {
+    const requestId = ++spatialRequestId.current;
 
     setSelectedLocation(location);
 
@@ -314,6 +319,27 @@ function App() {
     setRainfall(null);
 
     setError(null);
+
+    setSpatialProfile(null);
+    setSpatialError(null);
+    setSpatialLoading(true);
+
+    fetch(`${API_BASE_URL}/spatial/location/${encodeURIComponent(location.code)}`)
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`Spatial profile request failed (${response.status}).`);
+        return response.json();
+      })
+      .then((profile) => {
+        if (requestId === spatialRequestId.current) setSpatialProfile(profile);
+      })
+      .catch((err) => {
+        if (requestId === spatialRequestId.current) {
+          setSpatialError(err.message || "Unable to load spatial context.");
+        }
+      })
+      .finally(() => {
+        if (requestId === spatialRequestId.current) setSpatialLoading(false);
+      });
 
 
 
@@ -808,6 +834,22 @@ function App() {
     );
 
   }
+
+  function displayValue(value, digits = 2) {
+    return value === null || value === undefined || value === "" || !Number.isFinite(Number(value))
+      ? "—"
+      : Number(value).toFixed(digits);
+  }
+
+  const nearestMrc = spatialProfile?.nearest_mrc;
+  const rawMrcDistance = nearestMrc?.distance_km;
+  const mrcDistance = rawMrcDistance === null || rawMrcDistance === undefined || String(rawMrcDistance).trim() === ""
+    ? null
+    : Number(rawMrcDistance);
+  const hasMrcDistance = mrcDistance !== null && Number.isFinite(mrcDistance);
+  const proximity = hasMrcDistance
+    ? mrcDistance <= 25 ? "Nearby" : mrcDistance <= 75 ? "Regional" : mrcDistance <= 150 ? "Distant" : "Limited nearby hydrological coverage"
+    : null;
 
 
 
@@ -1407,7 +1449,35 @@ function App() {
                     </div>
                   )}
 
-
+                <section className="spatial-context">
+                  <h3>Spatial &amp; Hydrological Context</h3>
+                  <div className="spatial-point">
+                    <strong>Weather grid/model location</strong>
+                    <span>{displayValue(spatialProfile?.location?.latitude ?? selectedLocation.latitude, 4)}, {displayValue(spatialProfile?.location?.longitude ?? selectedLocation.longitude, 4)}</span>
+                    <span>Location type: {String(selectedLocation.code).startsWith("GRID_") ? "Weather grid point" : "Weather location / model point"}</span>
+                  </div>
+                  {spatialLoading && <p className="timestamp">Loading hydrological context…</p>}
+                  {spatialError && <p className="spatial-error">Spatial context unavailable: {spatialError}</p>}
+                  {nearestMrc && <>
+                    <div className="spatial-point station-point">
+                      <strong>Actual hydrological monitoring station</strong>
+                      <span>{nearestMrc.station_name || "Unnamed station"} ({nearestMrc.station_id || "—"})</span>
+                      <span>Coordinates: {displayValue(nearestMrc.station_latitude, 4)}, {displayValue(nearestMrc.station_longitude, 4)}</span>
+                      <span>Distance: {hasMrcDistance ? `${displayValue(mrcDistance, 3)} km · ${proximity}` : "Distance unavailable"}</span>
+                      {hasMrcDistance && mrcDistance > 75 && <em>This station may not represent conditions at the weather location precisely.</em>}
+                    </div>
+                    <div className="spatial-grid">
+                      <div><span>River</span><strong>{nearestMrc.river || "—"}</strong></div>
+                      <div><span>Water level</span><strong>{displayValue(nearestMrc.water_level)}{nearestMrc.water_level == null ? "" : " m"}</strong></div>
+                      <div><span>MRC rainfall</span><strong>{displayValue(nearestMrc.rainfall)}{nearestMrc.rainfall == null ? "" : " mm"}</strong></div>
+                      <div><span>MRC observation</span><strong>{nearestMrc.latest_measurement ? new Date(nearestMrc.latest_measurement).toLocaleString() : "Unavailable"}</strong></div>
+                      <div><span>Historical discharge</span><strong>{nearestMrc.discharge_available ? "Available" : "Unavailable"}</strong></div>
+                      <div><span>Discharge observations</span><strong>{displayValue(nearestMrc.discharge_observations, 0)}</strong></div>
+                      <div className="spatial-range"><span>Discharge date range</span><strong>{nearestMrc.discharge_first_date && nearestMrc.discharge_last_date ? `${new Date(nearestMrc.discharge_first_date).toLocaleDateString()} – ${new Date(nearestMrc.discharge_last_date).toLocaleDateString()}` : "Unavailable"}</strong></div>
+                    </div>
+                  </>}
+                  {!spatialLoading && !spatialError && spatialProfile && !nearestMrc && <p className="timestamp">No nearby MRC station data is available.</p>}
+                </section>
 
               </div>
 

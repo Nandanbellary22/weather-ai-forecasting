@@ -3,9 +3,11 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.routes import (
     forecasts,
+    location,
     mrc_forecasts,
     pctt,
     rainfall,
+    spatial,
     stations,
     weather,
 )
@@ -35,6 +37,8 @@ app.include_router(mrc_forecasts.router)
 app.include_router(pctt.router)
 app.include_router(weather.router)
 app.include_router(rainfall.router)
+app.include_router(spatial.router)
+app.include_router(location.router)
 
 
 @app.get("/")
