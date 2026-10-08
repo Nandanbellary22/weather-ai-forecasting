@@ -341,6 +341,9 @@
 .spatial-point strong { color: #334155; }
 .station-point { border-color: #a7f3d0; background: #f0fdf4; }
 .station-point em { color: #9a3412; font-style: normal; line-height: 1.4; }
+.reference-station-point { border-color: #bfdbfe; background: #eff6ff; }
+.reference-station-point h4 { margin: 0 0 3px; color: #1e3a8a; font-size: 14px; }
+.reference-station-point em { color: #1d4ed8; font-style: normal; line-height: 1.4; }
 .spatial-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .spatial-grid span { color: #64748b; font-size: 10px; font-weight: 700; text-transform: uppercase; }
 .spatial-grid strong { overflow-wrap: anywhere; font-size: 12px; }

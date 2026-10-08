@@ -142,5 +142,18 @@ class SpatialMRCResponse(BaseModel):
     maximum_discharge_m3s: float | None
 
 
+class SpatialReferenceStationResponse(BaseModel):
+    station_id: str
+    station_name: str | None
+    latitude: float
+    longitude: float
+    distance_km: float
+    relevance_category: str
+    network_type: str
+    source: str
+    source_doi: str
+    source_year: int | None
+
+
 class HealthResponse(BaseModel):
     status: str

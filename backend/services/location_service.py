@@ -155,6 +155,17 @@ def _get_nearest_mrc(
     )
 
 
+def _get_nearest_reference_station(latitude, longitude):
+    from backend.services.spatial_service import (
+        get_nearest_reference_station,
+    )
+
+    return get_nearest_reference_station(
+        latitude=latitude,
+        longitude=longitude,
+    )
+
+
 def _get_weather_forecasts(location_code):
     temperature_forecast = None
     rainfall_forecast = None
@@ -293,6 +304,16 @@ def get_location_profile(location_code):
         longitude=weather["longitude"],
     )
 
+    try:
+        nearest_reference_station = _get_nearest_reference_station(
+            latitude=weather["latitude"],
+            longitude=weather["longitude"],
+        )
+    except Exception:
+        # Reference metadata is optional and must not block the existing
+        # weather profile or MRC integration.
+        nearest_reference_station = None
+
     forecasts = _get_weather_forecasts(
         location_code
     )
@@ -307,5 +328,6 @@ def get_location_profile(location_code):
         "location": weather,
         "weather_forecast": forecasts,
         "nearest_mrc": nearest_mrc,
+        "nearest_reference_station": nearest_reference_station,
         "data_status": data_status,
     }

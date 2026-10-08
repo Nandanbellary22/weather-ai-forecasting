@@ -842,6 +842,7 @@ function App() {
   }
 
   const nearestMrc = spatialProfile?.nearest_mrc;
+  const nearestReferenceStation = spatialProfile?.nearest_reference_station;
   const rawMrcDistance = nearestMrc?.distance_km;
   const mrcDistance = rawMrcDistance === null || rawMrcDistance === undefined || String(rawMrcDistance).trim() === ""
     ? null
@@ -1476,6 +1477,19 @@ function App() {
                       <div className="spatial-range"><span>Discharge date range</span><strong>{nearestMrc.discharge_first_date && nearestMrc.discharge_last_date ? `${new Date(nearestMrc.discharge_first_date).toLocaleDateString()} – ${new Date(nearestMrc.discharge_last_date).toLocaleDateString()}` : "Unavailable"}</strong></div>
                     </div>
                   </>}
+                  {nearestReferenceStation && <div className="spatial-point reference-station-point">
+                    <h4>Hydrological Reference Station</h4>
+                    <strong>{nearestReferenceStation.station_name || "Unnamed station"}</strong>
+                    <span>Station ID: {nearestReferenceStation.station_id || "—"}</span>
+                    <span>Coordinates: {displayValue(nearestReferenceStation.latitude, 6)}, {displayValue(nearestReferenceStation.longitude, 6)}</span>
+                    <span>Distance: {displayValue(nearestReferenceStation.distance_km, 3)} km</span>
+                    <span>Spatial relevance: {nearestReferenceStation.relevance_category || "Unavailable"}</span>
+                    <span>Network type: {nearestReferenceStation.network_type || "Unavailable"}</span>
+                    <span>Source: {nearestReferenceStation.source || "Unavailable"}{nearestReferenceStation.source_year ? ` (${nearestReferenceStation.source_year})` : ""}</span>
+                    {nearestReferenceStation.source_doi && <span>DOI: {nearestReferenceStation.source_doi}</span>}
+                    <em>Reference metadata — not live observation data</em>
+                  </div>}
+                  {spatialProfile && !nearestReferenceStation && <p className="timestamp">Reference station metadata unavailable.</p>}
                   {!spatialLoading && !spatialError && spatialProfile && !nearestMrc && <p className="timestamp">No nearby MRC station data is available.</p>}
                 </section>
 

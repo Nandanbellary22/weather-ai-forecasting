@@ -19,6 +19,13 @@ MRC_STATIONS_FILE = (
     / "mrc_vietnam_stations.csv"
 )
 
+REFERENCE_STATIONS_FILE = (
+    PROJECT_ROOT
+    / "data"
+    / "processed"
+    / "hydrology_reference_stations_68.csv"
+)
+
 
 def get_connection():
     return psycopg2.connect(
@@ -104,6 +111,65 @@ def _read_mrc_stations():
                     "alarm_stage": _to_float(
                         row.get("alarm_stage")
                     ),
+                }
+            )
+
+    return stations
+
+
+def _read_reference_stations():
+    if not REFERENCE_STATIONS_FILE.exists():
+        raise FileNotFoundError(
+            f"Hydrologic reference station metadata file not found: "
+            f"{REFERENCE_STATIONS_FILE}"
+        )
+
+    required_columns = {
+        "station_id",
+        "station_name",
+        "latitude",
+        "longitude",
+        "network_type",
+        "source",
+        "source_doi",
+        "source_year",
+    }
+    stations = []
+
+    with REFERENCE_STATIONS_FILE.open(
+        "r",
+        encoding="utf-8-sig",
+        newline="",
+    ) as file:
+        reader = csv.DictReader(file)
+        missing_columns = required_columns - set(reader.fieldnames or [])
+        if missing_columns:
+            raise ValueError(
+                "Hydrologic reference station metadata is missing "
+                f"required columns: {', '.join(sorted(missing_columns))}"
+            )
+
+        for row in reader:
+            latitude = _to_float(row.get("latitude"))
+            longitude = _to_float(row.get("longitude"))
+            if (
+                latitude is None
+                or longitude is None
+                or not math.isfinite(latitude)
+                or not math.isfinite(longitude)
+            ):
+                continue
+
+            stations.append(
+                {
+                    "station_id": (row.get("station_id") or "").strip(),
+                    "station_name": (row.get("station_name") or "").strip() or None,
+                    "latitude": latitude,
+                    "longitude": longitude,
+                    "network_type": (row.get("network_type") or "").strip(),
+                    "source": (row.get("source") or "").strip(),
+                    "source_doi": (row.get("source_doi") or "").strip(),
+                    "source_year": _to_float(row.get("source_year")),
                 }
             )
 
@@ -381,4 +447,55 @@ def get_nearest_mrc_station(
         "maximum_discharge_m3s": discharge[
             "maximum_discharge_m3s"
         ],
+    }
+
+
+def get_nearest_reference_station(latitude, longitude):
+    """Return metadata for the nearest published reference station."""
+    stations = _read_reference_stations()
+    if not stations:
+        raise ValueError(
+            "No georeferenced hydrologic reference stations are available."
+        )
+
+    nearest_station = min(
+        stations,
+        key=lambda station: _haversine_distance_km(
+            latitude,
+            longitude,
+            station["latitude"],
+            station["longitude"],
+        ),
+    )
+    distance = _haversine_distance_km(
+        latitude,
+        longitude,
+        nearest_station["latitude"],
+        nearest_station["longitude"],
+    )
+
+    if distance <= 25:
+        relevance_category = "Nearby"
+    elif distance <= 75:
+        relevance_category = "Regional"
+    elif distance <= 150:
+        relevance_category = "Distant"
+    else:
+        relevance_category = "Limited nearby hydrological reference"
+
+    return {
+        "station_id": nearest_station["station_id"],
+        "station_name": nearest_station["station_name"],
+        "latitude": nearest_station["latitude"],
+        "longitude": nearest_station["longitude"],
+        "distance_km": round(distance, 3),
+        "relevance_category": relevance_category,
+        "network_type": nearest_station["network_type"],
+        "source": nearest_station["source"],
+        "source_doi": nearest_station["source_doi"],
+        "source_year": (
+            int(nearest_station["source_year"])
+            if nearest_station["source_year"] is not None
+            else None
+        ),
     }
