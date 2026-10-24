@@ -28,8 +28,8 @@ jobs:
           python-version: "3.12"
           cache: ""
 
-      - name: Install collector dependency
-        run: python -m pip install --disable-pip-version-check requests
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check requests psycopg2-binary
 
       - name: Collect forecasts for 500 locations
         run: python -u -m data_pipeline.crawlers.weather.collect_temperature_forecasts
@@ -52,8 +52,10 @@ jobs:
               raise SystemExit("No forecast snapshot was created.")
 
           snapshot = snapshots[0]
+
           with snapshot.open("r", newline="", encoding="utf-8-sig") as file:
               reader = csv.DictReader(file)
+              columns = reader.fieldnames or []
               rows = list(reader)
 
           expected_columns = {
@@ -70,7 +72,7 @@ jobs:
               "forecast_temperature_c",
           }
 
-          if not expected_columns.issubset(reader.fieldnames or []):
+          if not expected_columns.issubset(columns):
               raise SystemExit("Snapshot is missing required columns.")
 
           if len(rows) != 24000:
@@ -85,17 +87,282 @@ jobs:
           }
 
           if len(locations) != 500:
-              raise SystemExit(f"Expected 500 locations, found {len(locations)}.")
+              raise SystemExit(
+                  f"Expected 500 locations, found {len(locations)}."
+              )
 
           if len(pairs) != 24000:
               raise SystemExit("Duplicate location/target-time pairs detected.")
 
-          print(f"Validated snapshot: {snapshot}")
+          print(f"Validated snapshot: {snapshot.name}")
           print(f"Rows: {len(rows)}")
           print(f"Locations: {len(locations)}")
           PY
 
-      - name: Upload forecast snapshot
+      - name: Insert forecast snapshot into Supabase
+        env:
+          SUPABASE_DB_HOST: ${{ secrets.SUPABASE_DB_HOST }}
+          SUPABASE_DB_USER: ${{ secrets.SUPABASE_DB_USER }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: |
+          python - <<'PY'
+          import csv
+          import math
+          import os
+          import sys
+          from datetime import datetime, timezone
+          from pathlib import Path
+          from zoneinfo import ZoneInfo
+
+          import psycopg2
+          from psycopg2.extras import execute_values
+
+          required = (
+              "SUPABASE_DB_HOST",
+              "SUPABASE_DB_USER",
+              "SUPABASE_DB_PASSWORD",
+          )
+
+          missing = [key for key in required if not os.getenv(key)]
+          if missing:
+              sys.exit("Missing required GitHub secrets: " + ", ".join(missing))
+
+          output_dir = Path("data/processed/temperature_forecast_snapshots")
+          snapshots = sorted(
+              output_dir.glob("temperature_forecast_*.csv"),
+              key=lambda path: path.stat().st_mtime,
+              reverse=True,
+          )
+
+          if not snapshots:
+              sys.exit("No forecast snapshot found.")
+
+          snapshot = snapshots[0]
+          local_zone = ZoneInfo("Asia/Ho_Chi_Minh")
+
+          with snapshot.open("r", newline="", encoding="utf-8-sig") as file:
+              reader = csv.DictReader(file)
+              required_columns = {
+                  "collection_time_utc",
+                  "target_time_local",
+                  "timezone",
+                  "source",
+                  "location_id",
+                  "location_name",
+                  "requested_latitude",
+                  "requested_longitude",
+                  "returned_latitude",
+                  "returned_longitude",
+                  "forecast_temperature_c",
+              }
+
+              if not required_columns.issubset(reader.fieldnames or []):
+                  sys.exit("Snapshot is missing required columns.")
+
+              csv_rows = list(reader)
+
+          if len(csv_rows) != 24000:
+              sys.exit(f"Expected 24000 rows; found {len(csv_rows)}.")
+
+          records = []
+          seen_pairs = set()
+          collection_times = set()
+          timezones = set()
+          sources = set()
+
+          def optional_float(value, column, row_number):
+              if value is None or not value.strip():
+                  return None
+              try:
+                  number = float(value)
+              except ValueError:
+                  raise ValueError(
+                      f"Invalid {column} at CSV row {row_number}."
+                  )
+              if not math.isfinite(number):
+                  raise ValueError(
+                      f"Non-finite {column} at CSV row {row_number}."
+                  )
+              return number
+
+          for row_number, row in enumerate(csv_rows, start=2):
+              try:
+                  collection_time = datetime.fromisoformat(
+                      row["collection_time_utc"].replace("Z", "+00:00")
+                  )
+                  target_time = datetime.fromisoformat(
+                      row["target_time_local"].replace("Z", "+00:00")
+                  )
+
+                  if collection_time.tzinfo is None:
+                      raise ValueError("Collection timestamp lacks timezone.")
+                  if target_time.tzinfo is None:
+                      raise ValueError("Target timestamp lacks timezone.")
+
+                  collection_time = collection_time.astimezone(timezone.utc)
+                  target_time = target_time.astimezone(local_zone).replace(
+                      tzinfo=None
+                  )
+
+                  tz_name = row["timezone"].strip()
+                  if tz_name != "Asia/Ho_Chi_Minh":
+                      raise ValueError(f"Unexpected timezone: {tz_name}")
+
+                  location_id = row["location_id"].strip()
+                  if not location_id:
+                      raise ValueError("Empty location_id.")
+
+                  temperature = float(row["forecast_temperature_c"])
+                  if not math.isfinite(temperature):
+                      raise ValueError("Non-finite forecast temperature.")
+
+                  requested_latitude = float(row["requested_latitude"])
+                  requested_longitude = float(row["requested_longitude"])
+
+                  if not (
+                      math.isfinite(requested_latitude)
+                      and math.isfinite(requested_longitude)
+                      and -90 <= requested_latitude <= 90
+                      and -180 <= requested_longitude <= 180
+                  ):
+                      raise ValueError("Invalid requested coordinates.")
+
+                  returned_latitude = optional_float(
+                      row["returned_latitude"], "returned_latitude", row_number
+                  )
+                  returned_longitude = optional_float(
+                      row["returned_longitude"], "returned_longitude", row_number
+                  )
+
+                  if returned_latitude is not None and not -90 <= returned_latitude <= 90:
+                      raise ValueError("Invalid returned latitude.")
+                  if returned_longitude is not None and not -180 <= returned_longitude <= 180:
+                      raise ValueError("Invalid returned longitude.")
+
+                  pair = (location_id, target_time)
+                  if pair in seen_pairs:
+                      raise ValueError(
+                          f"Duplicate location/target time at CSV row {row_number}."
+                      )
+                  seen_pairs.add(pair)
+
+                  collection_times.add(collection_time)
+                  timezones.add(tz_name)
+                  sources.add(row["source"].strip())
+
+                  records.append((
+                      collection_time,
+                      target_time,
+                      tz_name,
+                      row["source"].strip(),
+                      location_id,
+                      row["location_name"].strip() or None,
+                      requested_latitude,
+                      requested_longitude,
+                      returned_latitude,
+                      returned_longitude,
+                      temperature,
+                  ))
+
+              except (ValueError, TypeError, OverflowError) as exc:
+                  sys.exit(f"Invalid CSV row {row_number}: {exc}")
+
+          if len({row[5] for row in records}) < 0:
+              sys.exit("Invalid location data.")
+
+          if len(collection_times) != 1 or len(timezones) != 1 or len(sources) != 1:
+              sys.exit("Snapshot contains inconsistent collection metadata.")
+
+          if len({row[4] for row in records}) != 500:
+              sys.exit("Snapshot does not contain exactly 500 locations.")
+
+          if len(seen_pairs) != 24000:
+              sys.exit("Snapshot does not contain 24000 unique location/time pairs.")
+
+          connection = None
+
+          try:
+              connection = psycopg2.connect(
+                  host=os.environ["SUPABASE_DB_HOST"].strip(),
+                  port=5432,
+                  dbname="postgres",
+                  user=os.environ["SUPABASE_DB_USER"].strip(),
+                  password=os.environ["SUPABASE_DB_PASSWORD"],
+                  sslmode="require",
+                  connect_timeout=20,
+              )
+
+              with connection:
+                  with connection.cursor() as cursor:
+                      cursor.execute("""
+                          SELECT COUNT(*)
+                          FROM public.temperature_forecast_snapshots
+                          WHERE collection_time_utc = %s
+                      """, (records[0][0],))
+                      existing_before = cursor.fetchone()[0]
+
+                      insert_sql = """
+                          INSERT INTO public.temperature_forecast_snapshots (
+                              collection_time_utc,
+                              target_time_local,
+                              timezone,
+                              source,
+                              location_id,
+                              location_name,
+                              requested_latitude,
+                              requested_longitude,
+                              returned_latitude,
+                              returned_longitude,
+                              forecast_temperature_c
+                          ) VALUES %s
+                          ON CONFLICT (
+                              collection_time_utc,
+                              location_id,
+                              target_time_local
+                          ) DO NOTHING
+                          RETURNING id
+                      """
+
+                      inserted_rows = execute_values(
+                          cursor,
+                          insert_sql,
+                          records,
+                          page_size=1000,
+                          fetch=True,
+                      )
+
+                      inserted_count = len(inserted_rows)
+
+                      cursor.execute("""
+                          SELECT COUNT(*)
+                          FROM public.temperature_forecast_snapshots
+                          WHERE collection_time_utc = %s
+                      """, (records[0][0],))
+                      existing_after = cursor.fetchone()[0]
+
+                      if existing_after != 24000:
+                          raise RuntimeError(
+                              f"Expected 24000 rows for this snapshot; "
+                              f"database contains {existing_after}."
+                          )
+
+              print("Supabase forecast import succeeded.")
+              print(f"Snapshot file: {snapshot.name}")
+              print(f"Rows validated: {len(records)}")
+              print(f"Rows inserted by this run: {inserted_count}")
+              print(f"Rows already present before insert: {existing_before}")
+              print(f"Rows stored for this snapshot: {existing_after}")
+
+          except Exception as exc:
+              sys.exit(
+                  f"Supabase import failed: {type(exc).__name__}: {exc}"
+              )
+          finally:
+              if connection is not None:
+                  connection.close()
+          PY
+
+      - name: Upload forecast snapshot backup
         uses: actions/upload-artifact@v4
         with:
           name: temperature-forecast-${{ github.run_id }}
