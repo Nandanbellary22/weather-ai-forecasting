@@ -1,34 +1,38 @@
 import os
+import warnings
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import psycopg2
+from dotenv import load_dotenv
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+load_dotenv(PROJECT_ROOT / ".env", override=False)
 
 SOURCE_TIMEZONE = "Asia/Ho_Chi_Minh"
 
 DB_CONFIG = {
-    "host": "localhost",
-    "port": 5432,
-    "database": "weather_forecasting",
-    "user": "postgres",
+    "host": os.getenv("PGHOST", "localhost"),
+    "port": int(os.getenv("PGPORT", "5432")),
+    "database": os.getenv("PGDATABASE", "weather_forecasting"),
+    "user": os.getenv("PGUSER", "postgres"),
 }
 
 
 def get_connection():
-    """Create a PostgreSQL connection."""
+    """Create a PostgreSQL connection using shared project settings."""
 
-    password = os.getenv("POSTGRES_PASSWORD")
+    password = os.getenv("PGPASSWORD")
 
     if not password:
         raise RuntimeError(
-            "POSTGRES_PASSWORD environment variable is not set."
+            "PGPASSWORD is not set. Configure it in the project-root .env "
+            "or in the process environment before starting the API."
         )
 
     return psycopg2.connect(
@@ -118,27 +122,21 @@ def create_features(df: pd.DataFrame) -> pd.DataFrame:
     """
     Create temporal and lag features.
 
-    Timestamp features are based on Vietnam local time.
+    Timestamp features are based on Vietnam local time. Calendar values are
+    known at prediction time; lag and rolling values use observations strictly
+    before the row timestamp, which remains the target time.
     """
 
-    data = df.copy()
+    if df.empty:
+        return df.copy()
 
-    if data.empty:
-        return data
-
-    data["timestamp"] = pd.to_datetime(
-        data["timestamp"],
-        errors="coerce",
-    )
-
-    if data["timestamp"].dt.tz is None:
-        data["timestamp"] = data["timestamp"].dt.tz_localize(
-            SOURCE_TIMEZONE
-        )
-    else:
-        data["timestamp"] = data["timestamp"].dt.tz_convert(
-            SOURCE_TIMEZONE
-        )
+    # Keep target gaps explicit; dependent feature rows are dropped before fit.
+    try:
+        data = _validate_hourly_history(df, allow_missing_values=True)
+    except ValueError as exc:
+        station_ids = df["station_id"].astype(str).unique() if "station_id" in df else []
+        context = f" for station {station_ids[0]}" if len(station_ids) == 1 else ""
+        raise ValueError(f"Invalid hourly history{context}: {exc}") from exc
 
     data["hour"] = data["timestamp"].dt.hour
     data["day_of_week"] = data["timestamp"].dt.dayofweek
@@ -152,23 +150,271 @@ def create_features(df: pd.DataFrame) -> pd.DataFrame:
 
     data["rolling_mean_6"] = (
         data["value"]
+        .shift(1)
         .rolling(6)
         .mean()
     )
 
     data["rolling_mean_12"] = (
         data["value"]
+        .shift(1)
         .rolling(12)
         .mean()
     )
 
     data["rolling_mean_24"] = (
         data["value"]
+        .shift(1)
         .rolling(24)
         .mean()
     )
 
     return data
+
+
+def _validate_hourly_history(
+    df: pd.DataFrame,
+    *,
+    minimum_rows: int = 1,
+    allow_missing_values: bool = False,
+) -> pd.DataFrame:
+    """Validate hourly timestamps and target values without filling gaps."""
+
+    required = {"timestamp", "value"}
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(f"History is missing required columns:{sorted(missing)}")
+    if len(df) < minimum_rows:
+        raise ValueError(
+            f"Insufficient hourly history: need at least {minimum_rows} rows."
+        )
+
+    data = df.copy()
+    timestamps = pd.to_datetime(data["timestamp"], errors="coerce")
+    if timestamps.isna().any():
+        raise ValueError("Hourly history contains invalid timestamps.")
+    if timestamps.dt.tz is None:
+        timestamps = timestamps.dt.tz_localize(SOURCE_TIMEZONE)
+    else:
+        timestamps = timestamps.dt.tz_convert(SOURCE_TIMEZONE)
+    if timestamps.duplicated().any():
+        raise ValueError("Hourly history contains duplicate timestamps.")
+    if not timestamps.is_monotonic_increasing:
+        raise ValueError("Hourly history timestamps must be strictly ordered.")
+    if len(timestamps) > 1 and not (timestamps.diff().iloc[1:] == pd.Timedelta(hours=1)).all():
+        raise ValueError("Hourly history is irregular or has missing hours.")
+
+    values = pd.to_numeric(data["value"], errors="coerce")
+    numeric_values = values.to_numpy(dtype=float)
+    if np.isinf(numeric_values).any():
+        raise ValueError("Hourly history contains non-finite target values.")
+    if not allow_missing_values and np.isnan(numeric_values).any():
+        raise ValueError("Hourly history contains missing target values.")
+
+    data["timestamp"] = timestamps
+    data["value"] = values.astype(float)
+    return data.reset_index(drop=True)
+
+
+def _next_step_features(values, timestamp: pd.Timestamp) -> pd.DataFrame:
+    """Build one recursive feature row from observations available before it."""
+
+    return pd.DataFrame([{
+        "hour": timestamp.hour,
+        "day_of_week": timestamp.dayofweek,
+        "day_of_month": timestamp.day,
+        "lag_1": values[-1],
+        "lag_3": values[-3],
+        "lag_6": values[-6],
+        "lag_12": values[-12],
+        "lag_24": values[-24],
+        "rolling_mean_6": float(np.mean(values[-6:])),
+        "rolling_mean_12": float(np.mean(values[-12:])),
+        "rolling_mean_24": float(np.mean(values[-24:])),
+    }], columns=FEATURE_COLUMNS)
+
+
+def _recursive_predictions(model, history: pd.DataFrame, horizon: int = 24):
+    """Predict a horizon recursively and validate timestamps and values."""
+
+    history = _validate_hourly_history(
+        history,
+        minimum_rows=24,
+        allow_missing_values=True,
+    )
+    if not np.isfinite(history["value"].tail(24).to_numpy(dtype=float)).all():
+        raise ValueError("The latest 24 hourly observations must have finite values.")
+    origin = history["timestamp"].iloc[-1]
+    values = history["value"].astype(float).tolist()
+    points = []
+    for step in range(1, horizon + 1):
+        timestamp = origin + pd.Timedelta(hours=step)
+        feature_row = _next_step_features(values, timestamp)
+        prediction = float(model.predict(feature_row[FEATURE_COLUMNS])[0])
+        values.append(prediction)
+        points.append({"timestamp": timestamp, "value": prediction})
+
+    _validate_forecast_points(points, origin=origin, horizon=horizon)
+    return points
+
+
+def _validate_forecast_points(points, *, origin, horizon=24):
+    if len(points) != horizon:
+        raise ValueError(f"Forecast must contain exactly {horizon} points.")
+    timestamps = pd.DatetimeIndex([point["timestamp"] for point in points])
+    expected = pd.date_range(
+        start=origin + pd.Timedelta(hours=1),
+        periods=horizon,
+        freq="h",
+    )
+    if timestamps.has_duplicates or not timestamps.is_monotonic_increasing:
+        raise ValueError("Forecast timestamps must be unique and ordered.")
+    if not timestamps.equals(expected):
+        raise ValueError("Forecast timestamps must be hourly, starting after the origin.")
+    values = np.asarray([point["value"] for point in points], dtype=float)
+    if not np.isfinite(values).all():
+        raise ValueError("Forecast contains missing or non-finite predictions.")
+    if len(values) > 1 and np.all(values == values[0]):
+        warnings.warn("Forecast predictions are constant acrossthe horizon.", RuntimeWarning)
+
+
+def evaluate_recursive_forecasts(
+    df: pd.DataFrame,
+    station_id: str,
+    *,
+    horizon: int = 24,
+    max_windows: int = 5,
+    minimum_train_rows: int = 100,
+) -> dict:
+    """Evaluate recursive Random Forest forecasts against persistence offline.
+
+    Returns ``status='insufficient'`` with no metric values unless at least two
+    complete chronological windows have enough pre-origin training rows.
+    This function does not load data, save results, or connect to the database.
+    """
+
+    if horizon != 24:
+        raise ValueError("Recursive evaluation currently supports a 24-hour horizon.")
+    if max_windows < 2:
+        raise ValueError("At least two evaluation windows are required.")
+    if "station_id" not in df.columns:
+        raise ValueError("Evaluation data must include station_id.")
+    station = df[df["station_id"].astype(str) == str(station_id)].copy()
+    try:
+        station = _validate_hourly_history(
+            station,
+            allow_missing_values=True,
+        )
+    except ValueError as exc:
+        return {"status": "insufficient", "reason": str(exc), "windows": 0}
+
+    candidate_origins = list(
+        range(len(station) - horizon, 0, -horizon)
+    )[:max_windows]
+    eligible_origins = []
+    for origin in candidate_origins:
+        if origin < 24:
+            continue
+        if not np.isfinite(
+            station["value"].iloc[origin - 24:origin].to_numpy(dtype=float)
+        ).all():
+            continue
+        training = create_features(station.iloc[:origin]).dropna(
+            subset=FEATURE_COLUMNS + ["value"]
+        )
+        if len(training) >= minimum_train_rows:
+            eligible_origins.append(origin)
+    origins = sorted(eligible_origins)
+    if len(origins) < 2:
+        return {
+            "status": "insufficient",
+            "reason": "Not enough history for at least two complete 24-hour test windows and training sets.",
+            "windows": len(origins),
+        }
+
+    actual, forest_predictions, persistence_predictions = [], [], []
+    evaluated_timestamps = []
+    excluded_comparisons = 0
+    window_results = []
+    for origin_index in origins:
+        history = station.iloc[:origin_index].copy()
+        truth = station.iloc[origin_index:origin_index + horizon]["value"].to_numpy(dtype=float)
+        training = create_features(history).dropna(
+            subset=FEATURE_COLUMNS + ["value"]
+        )
+        model = RandomForestRegressor(
+            n_estimators=200,
+            random_state=42,
+            n_jobs=-1,
+        )
+        model.fit(training[FEATURE_COLUMNS], training["value"])
+        predicted_points = _recursive_predictions(model, history, horizon)
+        forest_window = np.asarray(
+            [point["value"] for point in predicted_points], dtype=float
+        )
+        persistence_window = np.full(
+            horizon, float(history["value"].iloc[-1]), dtype=float
+        )
+        valid = np.isfinite(truth)
+        excluded = int((~valid).sum())
+        excluded_comparisons += excluded
+        actual_timestamps = station["timestamp"].iloc[
+            origin_index:origin_index + horizon
+        ]
+        window_results.append({
+            "forecast_origin": history["timestamp"].iloc[-1],
+            "evaluation_start": actual_timestamps.iloc[0],
+            "evaluation_end": actual_timestamps.iloc[-1],
+            "evaluated_observations": int(valid.sum()),
+            "excluded_comparisons": excluded,
+            "evaluated_start": actual_timestamps[valid].iloc[0]if valid.any() else None,
+            "evaluated_end": actual_timestamps[valid].iloc[-1] if valid.any() else None,
+        })
+        if valid.any():
+            actual.extend(truth[valid].tolist())
+            forest_predictions.extend(forest_window[valid].tolist())
+            persistence_predictions.extend(persistence_window[valid].tolist())
+            evaluated_timestamps.extend(actual_timestamps[valid].tolist())
+
+    evaluated_windows = sum(
+        item["evaluated_observations"] > 0 for item in window_results
+    )
+    if evaluated_windows < 2:
+        return {
+            "status": "insufficient",
+            "reason": "Fewer than two forecast windows have valid observations for comparison.",
+            "windows": len(origins),
+            "evaluated_windows": evaluated_windows,
+            "evaluated_observations": len(actual),
+            "excluded_comparisons": excluded_comparisons,
+        }
+
+    def metric_pair(predictions):
+        return {
+            "rmse": float(np.sqrt(mean_squared_error(actual, predictions))),
+            "mae": float(mean_absolute_error(actual, predictions)),
+        }
+
+    random_forest_metrics = metric_pair(forest_predictions)
+    persistence_metrics = metric_pair(persistence_predictions)
+    return {
+        "status": "success",
+        "windows": len(origins),
+        "horizon": horizon,
+        "points": len(actual),
+        "evaluated_observations": len(actual),
+        "evaluated_windows": evaluated_windows,
+        "excluded_comparisons": excluded_comparisons,
+        "evaluation_start": min(evaluated_timestamps),
+        "evaluation_end": max(evaluated_timestamps),
+        "window_results": window_results,
+        "random_forest": random_forest_metrics,
+        "persistence": persistence_metrics,
+        "random_forest_better_on_both_metrics": (
+            random_forest_metrics["rmse"] < persistence_metrics["rmse"]
+            and random_forest_metrics["mae"] < persistence_metrics["mae"]
+        ),
+    }
 
 
 FEATURE_COLUMNS = [
@@ -190,26 +436,47 @@ def train_model(
     station_id: str,
     model_type: str = "random_forest",
 ):
-    """
-    Train a forecasting model using PostgreSQL observations.
+    """Train on the longest continuous segment and return the latest segment.
+
+    The historical segment is used for model fitting and holdout metrics.
+    The latest continuous segment is returned as the recursive forecast history.
+    Gaps are never filled or bridged.
     """
 
     df = load_data()
-
     station_id = str(station_id)
 
-    station_df = df[
-        df["station_id"] == station_id
-    ].copy()
-
+    station_df = df[df["station_id"] == station_id].copy()
     if station_df.empty:
+        raise ValueError(f"No data found for station {station_id}.")
+
+    station_df = station_df.sort_values("timestamp").reset_index(drop=True)
+    timestamp_gap = station_df["timestamp"].diff()
+    segment_break = timestamp_gap.isna() | (
+        timestamp_gap != pd.Timedelta(hours=1)
+    )
+    station_df["_segment_id"] = segment_break.cumsum()
+
+    segments = [
+        group.drop(columns="_segment_id").reset_index(drop=True)
+        for _, group in station_df.groupby("_segment_id")
+    ]
+
+    training_history = max(segments, key=len)
+    latest_history = max(
+        segments,
+        key=lambda segment: segment["timestamp"].iloc[-1],
+    )
+
+    # Feature engineering requires at least 24 hours for lag/rolling features;
+    # retain a larger minimum to avoid training on an extremelyshort segment.
+    if len(training_history) < 125:
         raise ValueError(
-            f"No data found for station {station_id}."
+            f"Not enough continuous hourly history for station {station_id}."
         )
 
-    station_df = create_features(station_df)
-
-    model_data = station_df.dropna(
+    training_features = create_features(training_history)
+    model_data = training_features.dropna(
         subset=FEATURE_COLUMNS + ["value"]
     ).copy()
 
@@ -218,56 +485,39 @@ def train_model(
             f"Not enough valid observations for station {station_id}."
         )
 
-    split_index = int(
-        len(model_data) * 0.80
-    )
-
+    split_index = int(len(model_data) * 0.80)
     train_df = model_data.iloc[:split_index]
     test_df = model_data.iloc[split_index:]
 
+    if train_df.empty or test_df.empty:
+        raise ValueError(
+            f"Insufficient training or test data for station {station_id}."
+        )
+
     X_train = train_df[FEATURE_COLUMNS]
     y_train = train_df["value"]
-
     X_test = test_df[FEATURE_COLUMNS]
     y_test = test_df["value"]
 
     if model_type == "random_forest":
-
         model = RandomForestRegressor(
             n_estimators=200,
             random_state=42,
             n_jobs=-1,
         )
-
     elif model_type == "linear_regression":
-
         model = LinearRegression()
-
     else:
-
         raise ValueError(
             "Unsupported model type. "
             "Use 'random_forest' or 'linear_regression'."
         )
 
-    model.fit(
-        X_train,
-        y_train,
-    )
-
+    model.fit(X_train, y_train)
     predictions = model.predict(X_test)
 
-    mae = mean_absolute_error(
-        y_test,
-        predictions,
-    )
-
-    rmse = np.sqrt(
-        mean_squared_error(
-            y_test,
-            predictions,
-        )
-    )
+    mae = mean_absolute_error(y_test, predictions)
+    rmse = np.sqrt(mean_squared_error(y_test, predictions))
 
     metrics = {
         "mae": float(mae),
@@ -278,8 +528,9 @@ def train_model(
         "training_end": train_df["timestamp"].max(),
     }
 
-    return model, station_df, metrics
-
+    # Return only the latest contiguous segment for forecast input.
+    latest_history = create_features(latest_history)
+    return model, latest_history, metrics
 
 def forecast_next_24_hours(
     station_id: str,
@@ -299,6 +550,11 @@ def forecast_next_24_hours(
 
     station_id = str(station_id)
 
+    if "station_id" in station_df and not station_df["station_id"].astype(str).eq(station_id).all():
+        raise ValueError(
+            f"Forecast history contains observations for another station than {station_id}."
+        )
+
     history = station_df[
         [
             "timestamp",
@@ -306,97 +562,17 @@ def forecast_next_24_hours(
         ]
     ].copy()
 
-    history = history.dropna(
-        subset=["value"]
-    ).sort_values(
-        "timestamp"
-    ).reset_index(drop=True)
-
-    if len(history) < 24:
+    history = _validate_hourly_history(
+        history,
+        minimum_rows=24,
+        allow_missing_values=True,
+    )
+    if not np.isfinite(history["value"].tail(24).to_numpy(dtype=float)).all():
         raise ValueError(
-            "Not enough historical observations "
-            "for recursive forecasting."
+            "The latest 24 hourly observations must have finitevalues."
         )
 
-    forecast_points = []
-
-    values = list(
-        history["value"].astype(float)
-    )
-
-    timestamps = list(
-        history["timestamp"]
-    )
-
-    last_timestamp = timestamps[-1]
-
-    for step in range(1, 25):
-
-        forecast_timestamp = (
-            last_timestamp
-            + pd.Timedelta(hours=step)
-        )
-
-        current_hour = forecast_timestamp.hour
-
-        current_day_of_week = (
-            forecast_timestamp.dayofweek
-        )
-
-        current_day_of_month = (
-            forecast_timestamp.day
-        )
-
-        lag_1 = values[-1]
-        lag_3 = values[-3]
-        lag_6 = values[-6]
-        lag_12 = values[-12]
-        lag_24 = values[-24]
-
-        rolling_mean_6 = float(
-            np.mean(values[-6:])
-        )
-
-        rolling_mean_12 = float(
-            np.mean(values[-12:])
-        )
-
-        rolling_mean_24 = float(
-            np.mean(values[-24:])
-        )
-
-        features = pd.DataFrame(
-            [
-                {
-                    "hour": current_hour,
-                    "day_of_week": current_day_of_week,
-                    "day_of_month": current_day_of_month,
-                    "lag_1": lag_1,
-                    "lag_3": lag_3,
-                    "lag_6": lag_6,
-                    "lag_12": lag_12,
-                    "lag_24": lag_24,
-                    "rolling_mean_6": rolling_mean_6,
-                    "rolling_mean_12": rolling_mean_12,
-                    "rolling_mean_24": rolling_mean_24,
-                }
-            ]
-        )
-
-        prediction = float(
-            model.predict(
-                features[FEATURE_COLUMNS]
-            )[0]
-        )
-
-        values.append(prediction)
-
-        forecast_points.append(
-            {
-                "timestamp": forecast_timestamp,
-                "value": prediction,
-            }
-        )
+    forecast_points = _recursive_predictions(model, history, horizon=24)
 
     save_forecast_run(
         station_id=station_id,

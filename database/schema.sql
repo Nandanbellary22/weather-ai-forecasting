@@ -129,6 +129,41 @@ ON evn_reservoirs (reservoir_name);
 
 
 -- ============================================================
+-- 4b. Historical EVN reservoir observations
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS evn_reservoir_observations (
+    id BIGSERIAL PRIMARY KEY,
+    reservoir_name TEXT NOT NULL,
+    requested_date DATE NOT NULL,
+    observation_time_raw TEXT,
+    observation_timestamp TIMESTAMP,
+    observation_year_inferred BOOLEAN,
+    observation_year_method VARCHAR(100),
+    water_level_m DOUBLE PRECISION,
+    normal_water_level_m DOUBLE PRECISION,
+    dead_water_level_m DOUBLE PRECISION,
+    inflow_m3s DOUBLE PRECISION,
+    total_discharge_m3s DOUBLE PRECISION,
+    spillway_discharge_m3s DOUBLE PRECISION,
+    powerhouse_discharge_m3s DOUBLE PRECISION,
+    deep_release_gates DOUBLE PRECISION,
+    surface_release_gates DOUBLE PRECISION,
+    source VARCHAR(100),
+    quality_flag VARCHAR(50),
+    collection_status VARCHAR(50),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT uq_evn_reservoir_observations_name_requested_date
+        UNIQUE (reservoir_name, requested_date)
+);
+
+COMMENT ON TABLE evn_reservoir_observations IS
+    'Historical EVN reservoir observations; requested date is distinct from the year-inferred source observation timestamp.';
+
+
+-- ============================================================
 -- 5. Forecast runs
 -- ============================================================
 

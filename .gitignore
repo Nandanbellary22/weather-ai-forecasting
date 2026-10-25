@@ -23,7 +23,9 @@ data/processed/*
 
 # OS
 .DS_Store
-Thumbs.dbmodels/
+Thumbs.db
+
+_upload_snapshot/
 
 models/
 

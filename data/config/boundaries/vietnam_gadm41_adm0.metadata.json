@@ -1,0 +1,31 @@
+{
+  "dataset_name": "GADM Vietnam ADM0",
+  "version": "4.1",
+  "source_url": "https://geodata.ucdavis.edu/gadm/gadm4.1/json/gadm41_VNM_0.json",
+  "retrieved_at_utc": "2026-10-21T07:03:03.901617+00:00",
+  "artifact_file": "vietnam_gadm41_adm0.json",
+  "artifact_size_bytes": 341533,
+  "sha256": "89e0485fe797109ca479d3b125e6542fc9a10d7b1abb183d416e5cd2e7bcd95f",
+  "coordinate_axis_order": [
+    "longitude",
+    "latitude"
+  ],
+  "declared_crs": {
+    "type": "name",
+    "properties": {
+      "name": "urn:ogc:def:crs:OGC:1.3:CRS84"
+    }
+  },
+  "geometry_type": "MultiPolygon",
+  "feature_count": 1,
+  "geometry_validation": {
+    "is_valid": true,
+    "is_empty": false,
+    "bounds_longitude_latitude": [
+      102.1446,
+      8.3814,
+      109.469,
+      23.3927
+    ]
+  }
+}

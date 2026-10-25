@@ -1,15 +1,26 @@
+﻿
+import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# Load the project-root .env before importing routes and services.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+load_dotenv(PROJECT_ROOT / ".env", override=False)
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.routes import (
+    coordinator,
     forecasts,
     location,
     mrc_forecasts,
     pctt,
-    rainfall,
     spatial,
     stations,
     weather,
+    temperature_forecasts,
 )
 
 
@@ -36,10 +47,10 @@ app.include_router(forecasts.router)
 app.include_router(mrc_forecasts.router)
 app.include_router(pctt.router)
 app.include_router(weather.router)
-app.include_router(rainfall.router)
 app.include_router(spatial.router)
 app.include_router(location.router)
-
+app.include_router(coordinator.router)
+app.include_router(temperature_forecasts.router)
 
 @app.get("/")
 def root():
