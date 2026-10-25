@@ -26,6 +26,19 @@ function formatTime(timestamp) {
   });
 }
 
+function formatValue(value, decimals = 1) {
+  if (
+    value === null ||
+    value === undefined ||
+    value === "" ||
+    !Number.isFinite(Number(value))
+  ) {
+    return "—";
+  }
+
+  return Number(value).toFixed(decimals);
+}
+
 async function getJson(url, signal) {
   const response = await fetch(url, { signal });
 
@@ -46,10 +59,7 @@ async function getJson(url, signal) {
 }
 
 function Metric({ label, value, unit }) {
-  const display =
-    value === null || value === undefined || !Number.isFinite(Number(value))
-      ? "—"
-      : Number(value).toFixed(1);
+  const display = formatValue(value);
 
   return (
     <div className="forecast-metric">
@@ -62,11 +72,16 @@ function Metric({ label, value, unit }) {
   );
 }
 
-export default function RecentWeatherPanel({ api, locationCode, locationName }) {
+export default function RecentWeatherPanel({
+  api,
+  locationCode,
+  locationName,
+}) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [view, setView] = useState("all");
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     if (!locationCode) {
@@ -91,16 +106,22 @@ export default function RecentWeatherPanel({ api, locationCode, locationName }) 
         );
 
         if (!Array.isArray(result.hourly)) {
-          throw new Error("The recent-weather response has an unexpected format.");
+          throw new Error(
+            "The recent-weather response has an unexpected format."
+          );
         }
 
-        if (active) setData(result);
+        if (active) {
+          setData(result);
+        }
       } catch (err) {
         if (active && err.name !== "AbortError") {
           setError(err.message || "Unable to load recent weather.");
         }
       } finally {
-        if (active) setLoading(false);
+        if (active) {
+          setLoading(false);
+        }
       }
     }
 
@@ -110,24 +131,28 @@ export default function RecentWeatherPanel({ api, locationCode, locationName }) 
       active = false;
       controller.abort();
     };
-  }, [api, locationCode]);
+  }, [api, locationCode, refreshKey]);
 
   const chartRecords = (data?.hourly || []).map((item) => ({
     ...item,
     chartTime: formatTime(item.timestamp),
-    temperature: Number(item.temperature_c),
-    rainfall: Number(item.precipitation_mm),
+    temperature: Number.isFinite(Number(item.temperature_c))
+      ? Number(item.temperature_c)
+      : null,
   }));
 
   const displayedRecords =
-    view === "past"
+    view === "first"
       ? chartRecords.slice(0, 24)
-      : view === "forecast"
+      : view === "last"
         ? chartRecords.slice(-24)
         : chartRecords;
 
+  // Use the final timestamped record rather than the middle of the series.
   const latest = chartRecords.length
-    ? chartRecords[Math.floor((chartRecords.length - 1) / 2)]
+    ? [...chartRecords].sort((a, b) =>
+        String(a.timestamp).localeCompare(String(b.timestamp))
+      )[chartRecords.length - 1]
     : null;
 
   return (
@@ -147,9 +172,10 @@ export default function RecentWeatherPanel({ api, locationCode, locationName }) 
         {locationName || locationCode
           ? `Location: ${locationName || locationCode} (${locationCode}). `
           : ""}
-        Hourly provider-model data fetched on demand. These values are
-        separate from the project's trained ML forecasts and are not
-        independently verified station observations.
+        Hourly weather-model data fetched on demand. These values are separate
+        from the project's trained ML forecasts and are not independently
+        verified station observations. The returned time range may include
+        both past model estimates and future forecasts.
       </p>
 
       {!locationCode && (
@@ -170,9 +196,10 @@ export default function RecentWeatherPanel({ api, locationCode, locationName }) 
           <p>{error}</p>
           <button
             className="secondary-button"
-            onClick={() => setView((current) => current)}
+            onClick={() => setRefreshKey((key) => key + 1)}
+            disabled={loading}
           >
-            Check location selection
+            Retry request
           </button>
         </div>
       )}
@@ -182,21 +209,20 @@ export default function RecentWeatherPanel({ api, locationCode, locationName }) 
           <div className="notice-strip" style={{ marginTop: 14 }}>
             <span>i</span>
             <p>
-              Source: {data.source}. All timestamps use {data.timezone}.
-              This response does not update PostgreSQL or any trained model.
+              Source: {data.source || "Provider unavailable"}. All timestamps
+              use {data.timezone || "the provider's configured timezone"}.
+              This request does not update PostgreSQL or any trained model.
             </p>
           </div>
 
           <div className="forecast-metrics-row" style={{ marginTop: 16 }}>
             <span>
               Hourly records
-              <strong>{data.returned_hour_count}</strong>
+              <strong>{data.returned_hour_count ?? data.hourly.length}</strong>
             </span>
             <span>
               First timestamp
-              <strong>
-                {formatTime(data.hourly[0]?.timestamp)}
-              </strong>
+              <strong>{formatTime(data.hourly[0]?.timestamp)}</strong>
             </span>
             <span>
               Last timestamp
@@ -218,51 +244,66 @@ export default function RecentWeatherPanel({ api, locationCode, locationName }) 
             }}
           >
             <button
-              className={view === "all" ? "primary-button" : "secondary-button"}
+              className={
+                view === "all" ? "primary-button" : "secondary-button"
+              }
               onClick={() => setView("all")}
             >
               All hours
             </button>
-            <button
-              className={view === "past" ? "primary-button" : "secondary-button"}
-              onClick={() => setView("past")}
-            >
-              First 24 hours
-            </button>
+
             <button
               className={
-                view === "forecast" ? "primary-button" : "secondary-button"
+                view === "first" ? "primary-button" : "secondary-button"
               }
-              onClick={() => setView("forecast")}
+              onClick={() => setView("first")}
             >
-              Last 24 hours
+              First 24 records
+            </button>
+
+            <button
+              className={
+                view === "last" ? "primary-button" : "secondary-button"
+              }
+              onClick={() => setView("last")}
+            >
+              Last 24 records
             </button>
           </div>
 
           <div className="forecast-metrics-row" style={{ marginTop: 18 }}>
             <Metric
-              label="Temperature"
+              label="Last returned temperature"
               value={latest?.temperature_c}
               unit="°C"
             />
             <Metric
-              label="Rainfall"
+              label="Last returned rainfall"
               value={latest?.precipitation_mm}
               unit="mm"
             />
             <Metric
-              label="Humidity"
+              label="Last returned humidity"
               value={latest?.relative_humidity_2m}
               unit="%"
             />
             <Metric
-              label="Wind speed"
+              label="Last returned wind speed"
               value={latest?.wind_speed_kmh}
               unit="km/h"
             />
           </div>
 
+          {latest && (
+            <p className="chart-caption" style={{ marginTop: 10 }}>
+              Summary values are from the last returned record at{" "}
+              {formatTime(latest.timestamp)}. This timestamp does not
+              necessarily represent the current time or a verified observation.
+            </p>
+          )}
+
           <h3 style={{ marginTop: 24 }}>Hourly temperature</h3>
+
           <div className="chart-area" style={{ height: 300, marginTop: 12 }}>
             {displayedRecords.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
@@ -289,7 +330,9 @@ export default function RecentWeatherPanel({ api, locationCode, locationName }) 
                   />
                   <Tooltip
                     formatter={(value) => [
-                      `${Number(value).toFixed(1)} °C`,
+                      value === null || value === undefined
+                        ? "Unavailable"
+                        : `${Number(value).toFixed(1)} °C`,
                       "Provider-model temperature",
                     ]}
                     labelFormatter={(label) => `Vietnam time: ${label}`}
@@ -311,6 +354,7 @@ export default function RecentWeatherPanel({ api, locationCode, locationName }) 
           </div>
 
           <h3 style={{ marginTop: 24 }}>Hourly details</h3>
+
           <div style={{ overflowX: "auto", marginTop: 10 }}>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
@@ -329,16 +373,16 @@ export default function RecentWeatherPanel({ api, locationCode, locationName }) 
                       {formatTime(item.timestamp)}
                     </td>
                     <td style={{ textAlign: "right", padding: 9 }}>
-                      {item.temperature_c ?? "—"}
+                      {formatValue(item.temperature_c)}
                     </td>
                     <td style={{ textAlign: "right", padding: 9 }}>
-                      {item.precipitation_mm ?? "—"}
+                      {formatValue(item.precipitation_mm)}
                     </td>
                     <td style={{ textAlign: "right", padding: 9 }}>
-                      {item.relative_humidity_2m ?? "—"}
+                      {formatValue(item.relative_humidity_2m, 0)}
                     </td>
                     <td style={{ textAlign: "right", padding: 9 }}>
-                      {item.wind_speed_kmh ?? "—"}
+                      {formatValue(item.wind_speed_kmh)}
                     </td>
                   </tr>
                 ))}
@@ -347,9 +391,11 @@ export default function RecentWeatherPanel({ api, locationCode, locationName }) 
           </div>
 
           <p className="chart-caption" style={{ marginTop: 14 }}>
-            The endpoint requests 24 past hours and 24 forecast hours.
-            The provider determines the timestamps returned. Past values
-            are not guaranteed to be measured observations.
+            The endpoint requests 24 past hours and 24 forecast hours. The
+            provider determines the timestamps returned, and past values are
+            not guaranteed to be measured observations. The first/last record
+            buttons select positions in the returned series, not guaranteed
+            observation and forecast periods.
           </p>
         </>
       )}
