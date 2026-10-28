@@ -34,12 +34,77 @@ jobs:
       - name: Collect forecasts for 500 locations
         run: python -u -m data_pipeline.crawlers.weather.collect_temperature_forecasts
 
+      - name: Check snapshot freshness
+        shell: bash
+        run: |
+          python - <<'PY'
+          import csv
+          import sys
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          output_dir = Path("data/processed/temperature_forecast_snapshots")
+          snapshots = sorted(
+              output_dir.glob("temperature_forecast_*.csv"),
+              key=lambda path: path.stat().st_mtime,
+              reverse=True,
+          )
+
+          if not snapshots:
+              sys.exit("No forecast snapshot found for freshness check.")
+
+          snapshot = snapshots[0]
+
+          with snapshot.open("r", newline="", encoding="utf-8-sig") as file:
+              reader = csv.DictReader(file)
+              first_row = next(reader, None)
+
+          if not first_row:
+              sys.exit("Forecast snapshot is empty.")
+
+          try:
+              raw_timestamp = first_row["collection_time_utc"]
+              collection_time = datetime.fromisoformat(
+                  raw_timestamp.replace("Z", "+00:00")
+              )
+          except (KeyError, ValueError, AttributeError) as exc:
+              raise SystemExit("Invalid collection timestamp.") from exc
+
+          if collection_time.tzinfo is None:
+              sys.exit("Collection timestamp must include a timezone.")
+
+          age_hours = (
+              datetime.now(timezone.utc)
+              - collection_time.astimezone(timezone.utc)
+          ).total_seconds() / 3600
+
+          max_age_hours = 3.0
+
+          if age_hours < 0:
+              sys.exit(
+                  f"Snapshot timestamp is in the future: age={age_hours:.2f}h."
+              )
+
+          if age_hours > max_age_hours:
+              sys.exit(
+                  f"Snapshot freshness check failed: age={age_hours:.2f}h; "
+                  f"maximum={max_age_hours:.2f}h."
+              )
+
+          print(f"Snapshot: {snapshot.name}")
+          print(f"Snapshot age: {age_hours:.2f} hours")
+          print("Freshness check passed.")
+          PY
+
       - name: Validate latest snapshot
         shell: bash
         run: |
           python - <<'PY'
           import csv
+          import math
+          from datetime import datetime, timedelta
           from pathlib import Path
+          from zoneinfo import ZoneInfo
 
           output_dir = Path("data/processed/temperature_forecast_snapshots")
           snapshots = sorted(
@@ -53,12 +118,7 @@ jobs:
 
           snapshot = snapshots[0]
 
-          with snapshot.open("r", newline="", encoding="utf-8-sig") as file:
-              reader = csv.DictReader(file)
-              columns = reader.fieldnames or []
-              rows = list(reader)
-
-          expected_columns = {
+          required_columns = {
               "collection_time_utc",
               "target_time_local",
               "timezone",
@@ -72,19 +132,96 @@ jobs:
               "forecast_temperature_c",
           }
 
-          if not expected_columns.issubset(columns):
-              raise SystemExit("Snapshot is missing required columns.")
+          with snapshot.open("r", newline="", encoding="utf-8-sig") as file:
+              reader = csv.DictReader(file)
+
+              if not required_columns.issubset(reader.fieldnames or []):
+                  raise SystemExit("Snapshot is missing required columns.")
+
+              rows = list(reader)
 
           if len(rows) != 24000:
               raise SystemExit(
-                  f"Expected 24000 rows, found {len(rows)} in {snapshot.name}"
+                  f"Expected 24000 rows, found {len(rows)} in {snapshot.name}."
               )
 
-          locations = {row["location_id"] for row in rows}
-          pairs = {
-              (row["location_id"], row["target_time_local"])
-              for row in rows
-          }
+          location_targets = {}
+          locations = set()
+          pairs = set()
+          collection_times = set()
+          timezones = set()
+          sources = set()
+          local_zone = ZoneInfo("Asia/Ho_Chi_Minh")
+
+          for row_number, row in enumerate(rows, start=2):
+              try:
+                  location_id = row["location_id"].strip()
+                  if not location_id:
+                      raise ValueError("Empty location_id.")
+
+                  collection_time = datetime.fromisoformat(
+                      row["collection_time_utc"].replace("Z", "+00:00")
+                  )
+                  target_time = datetime.fromisoformat(
+                      row["target_time_local"].replace("Z", "+00:00")
+                  )
+
+                  if collection_time.tzinfo is None:
+                      raise ValueError("Collection timestamp lacks timezone.")
+
+                  if target_time.tzinfo is None:
+                      raise ValueError("Target timestamp lacks timezone.")
+
+                  if target_time.utcoffset() != timedelta(hours=7):
+                      raise ValueError(
+                          "Target timestamp must have the Vietnam +07:00 offset."
+                      )
+
+                  if row["timezone"].strip() != "Asia/Ho_Chi_Minh":
+                      raise ValueError("Unexpected timezone.")
+
+                  temperature = float(row["forecast_temperature_c"])
+                  if not math.isfinite(temperature):
+                      raise ValueError("Non-finite forecast temperature.")
+
+                  for column, lower, upper in (
+                      ("requested_latitude", -90, 90),
+                      ("requested_longitude", -180, 180),
+                  ):
+                      coordinate = float(row[column])
+                      if not math.isfinite(coordinate) or not lower <= coordinate <= upper:
+                          raise ValueError(f"Invalid {column}.")
+
+                  for column, lower, upper in (
+                      ("returned_latitude", -90, 90),
+                      ("returned_longitude", -180, 180),
+                  ):
+                      raw = row[column].strip()
+                      if raw:
+                          coordinate = float(raw)
+                          if not math.isfinite(coordinate) or not lower <= coordinate <= upper:
+                              raise ValueError(f"Invalid {column}.")
+
+                  collection_times.add(
+                      collection_time.astimezone(ZoneInfo("UTC"))
+                  )
+                  timezones.add(row["timezone"].strip())
+                  sources.add(row["source"].strip())
+
+                  target_key = target_time.astimezone(local_zone)
+                  pair = (location_id, target_key)
+
+                  if pair in pairs:
+                      raise ValueError("Duplicate location/target-time pair.")
+
+                  pairs.add(pair)
+                  locations.add(location_id)
+                  location_targets.setdefault(location_id, set()).add(target_key)
+
+              except (ValueError, TypeError, KeyError, OverflowError) as exc:
+                  raise SystemExit(
+                      f"Invalid CSV row {row_number}: {exc}"
+                  ) from exc
 
           if len(locations) != 500:
               raise SystemExit(
@@ -92,11 +229,49 @@ jobs:
               )
 
           if len(pairs) != 24000:
-              raise SystemExit("Duplicate location/target-time pairs detected.")
+              raise SystemExit("Expected 24000 unique location/target-time pairs.")
+
+          if len(collection_times) != 1:
+              raise SystemExit("Snapshot has inconsistent collection timestamps.")
+
+          if len(timezones) != 1 or timezones != {"Asia/Ho_Chi_Minh"}:
+              raise SystemExit("Snapshot has inconsistent timezone metadata.")
+
+          if len(sources) != 1 or not next(iter(sources), ""):
+              raise SystemExit("Snapshot has inconsistent or empty source metadata.")
+
+          expected_hours = None
+
+          for location_id, targets in location_targets.items():
+              ordered_targets = sorted(targets)
+
+              if len(ordered_targets) != 48:
+                  raise SystemExit(
+                      f"{location_id}: expected 48 target hours, "
+                      f"found {len(ordered_targets)}."
+                  )
+
+              for previous, current in zip(
+                  ordered_targets, ordered_targets[1:]
+              ):
+                  if current - previous != timedelta(hours=1):
+                      raise SystemExit(
+                          f"{location_id}: target timestamps are not "
+                          "consecutive hourly values."
+                      )
+
+              if expected_hours is None:
+                  expected_hours = ordered_targets
+              elif ordered_targets != expected_hours:
+                  raise SystemExit(
+                      f"{location_id}: target hours differ from other locations."
+                  )
 
           print(f"Validated snapshot: {snapshot.name}")
           print(f"Rows: {len(rows)}")
           print(f"Locations: {len(locations)}")
+          print("Target hours per location: 48 consecutive hours")
+          print("Snapshot validation passed.")
           PY
 
       - name: Insert forecast snapshot into Supabase
@@ -169,20 +344,24 @@ jobs:
           collection_times = set()
           timezones = set()
           sources = set()
+          targets_by_location = {}
 
           def optional_float(value, column, row_number):
               if value is None or not value.strip():
                   return None
+
               try:
                   number = float(value)
-              except ValueError:
+              except ValueError as exc:
                   raise ValueError(
                       f"Invalid {column} at CSV row {row_number}."
-                  )
+                  ) from exc
+
               if not math.isfinite(number):
                   raise ValueError(
                       f"Non-finite {column} at CSV row {row_number}."
                   )
+
               return number
 
           for row_number, row in enumerate(csv_rows, start=2):
@@ -196,21 +375,28 @@ jobs:
 
                   if collection_time.tzinfo is None:
                       raise ValueError("Collection timestamp lacks timezone.")
+
                   if target_time.tzinfo is None:
                       raise ValueError("Target timestamp lacks timezone.")
+
+                  if target_time.utcoffset() is None:
+                      raise ValueError("Target timestamp has no UTC offset.")
+
+                  if row["timezone"].strip() != "Asia/Ho_Chi_Minh":
+                      raise ValueError("Unexpected timezone.")
 
                   collection_time = collection_time.astimezone(timezone.utc)
                   target_time = target_time.astimezone(local_zone).replace(
                       tzinfo=None
                   )
 
-                  tz_name = row["timezone"].strip()
-                  if tz_name != "Asia/Ho_Chi_Minh":
-                      raise ValueError(f"Unexpected timezone: {tz_name}")
-
                   location_id = row["location_id"].strip()
                   if not location_id:
                       raise ValueError("Empty location_id.")
+
+                  source = row["source"].strip()
+                  if not source:
+                      raise ValueError("Empty source.")
 
                   temperature = float(row["forecast_temperature_c"])
                   if not math.isfinite(temperature):
@@ -236,6 +422,7 @@ jobs:
 
                   if returned_latitude is not None and not -90 <= returned_latitude <= 90:
                       raise ValueError("Invalid returned latitude.")
+
                   if returned_longitude is not None and not -180 <= returned_longitude <= 180:
                       raise ValueError("Invalid returned longitude.")
 
@@ -244,17 +431,18 @@ jobs:
                       raise ValueError(
                           f"Duplicate location/target time at CSV row {row_number}."
                       )
-                  seen_pairs.add(pair)
 
+                  seen_pairs.add(pair)
                   collection_times.add(collection_time)
-                  timezones.add(tz_name)
-                  sources.add(row["source"].strip())
+                  timezones.add(row["timezone"].strip())
+                  sources.add(source)
+                  targets_by_location.setdefault(location_id, set()).add(target_time)
 
                   records.append((
                       collection_time,
                       target_time,
-                      tz_name,
-                      row["source"].strip(),
+                      row["timezone"].strip(),
+                      source,
                       location_id,
                       row["location_name"].strip() or None,
                       requested_latitude,
@@ -264,20 +452,59 @@ jobs:
                       temperature,
                   ))
 
-              except (ValueError, TypeError, OverflowError) as exc:
+              except (ValueError, TypeError, KeyError, OverflowError) as exc:
                   sys.exit(f"Invalid CSV row {row_number}: {exc}")
 
-          if len({row[5] for row in records}) < 0:
-              sys.exit("Invalid location data.")
+          if len(collection_times) != 1:
+              sys.exit("Snapshot contains inconsistent collection timestamps.")
 
-          if len(collection_times) != 1 or len(timezones) != 1 or len(sources) != 1:
-              sys.exit("Snapshot contains inconsistent collection metadata.")
+          if len(timezones) != 1 or timezones != {"Asia/Ho_Chi_Minh"}:
+              sys.exit("Snapshot contains inconsistent timezone metadata.")
 
-          if len({row[4] for row in records}) != 500:
+          if len(sources) != 1:
+              sys.exit("Snapshot contains inconsistent source metadata.")
+
+          if len(targets_by_location) != 500:
               sys.exit("Snapshot does not contain exactly 500 locations.")
 
           if len(seen_pairs) != 24000:
               sys.exit("Snapshot does not contain 24000 unique location/time pairs.")
+
+          expected_targets = None
+
+          for location_id, targets in targets_by_location.items():
+              ordered_targets = sorted(targets)
+
+              if len(ordered_targets) != 48:
+                  sys.exit(
+                      f"{location_id}: expected 48 target hours, "
+                      f"found {len(ordered_targets)}."
+                  )
+
+              for previous, current in zip(
+                  ordered_targets, ordered_targets[1:]
+              ):
+                  if (current - previous).total_seconds() != 3600:
+                      sys.exit(
+                          f"{location_id}: target hours are not consecutive."
+                      )
+
+              if expected_targets is None:
+                  expected_targets = ordered_targets
+              elif ordered_targets != expected_targets:
+                  sys.exit(
+                      f"{location_id}: target hours differ from other locations."
+                  )
+
+          snapshot_collection_time = records[0][0]
+          age_hours = (
+              datetime.now(timezone.utc) - snapshot_collection_time
+          ).total_seconds() / 3600
+
+          if age_hours < 0 or age_hours > 3:
+              sys.exit(
+                  f"Snapshot became stale before import: age={age_hours:.2f}h."
+              )
 
           connection = None
 
@@ -294,11 +521,14 @@ jobs:
 
               with connection:
                   with connection.cursor() as cursor:
-                      cursor.execute("""
+                      cursor.execute(
+                          """
                           SELECT COUNT(*)
                           FROM public.temperature_forecast_snapshots
                           WHERE collection_time_utc = %s
-                      """, (records[0][0],))
+                          """,
+                          (snapshot_collection_time,),
+                      )
                       existing_before = cursor.fetchone()[0]
 
                       insert_sql = """
@@ -333,12 +563,17 @@ jobs:
 
                       inserted_count = len(inserted_rows)
 
-                      cursor.execute("""
-                          SELECT COUNT(*)
+                      cursor.execute(
+                          """
+                          SELECT
+                              COUNT(*) AS row_count,
+                              COUNT(DISTINCT location_id) AS location_count
                           FROM public.temperature_forecast_snapshots
                           WHERE collection_time_utc = %s
-                      """, (records[0][0],))
-                      existing_after = cursor.fetchone()[0]
+                          """,
+                          (snapshot_collection_time,),
+                      )
+                      existing_after, location_count = cursor.fetchone()
 
                       if existing_after != 24000:
                           raise RuntimeError(
@@ -346,12 +581,61 @@ jobs:
                               f"database contains {existing_after}."
                           )
 
-              print("Supabase forecast import succeeded.")
+                      if location_count != 500:
+                          raise RuntimeError(
+                              f"Expected 500 database locations; "
+                              f"found {location_count}."
+                          )
+
+                      cursor.execute(
+                          """
+                          SELECT location_id, COUNT(*), COUNT(DISTINCT target_time_local)
+                          FROM public.temperature_forecast_snapshots
+                          WHERE collection_time_utc = %s
+                          GROUP BY location_id
+                          HAVING COUNT(*) <> 48
+                             OR COUNT(DISTINCT target_time_local) <> 48
+                          LIMIT 10
+                          """,
+                          (snapshot_collection_time,),
+                      )
+                      invalid_locations = cursor.fetchall()
+
+                      if invalid_locations:
+                          raise RuntimeError(
+                              "Database verification failed: some locations "
+                              f"do not have 48 unique target hours: {invalid_locations}"
+                          )
+
+                      cursor.execute(
+                          """
+                          SELECT COUNT(*)
+                          FROM (
+                              SELECT DISTINCT target_time_local
+                              FROM public.temperature_forecast_snapshots
+                              WHERE collection_time_utc = %s
+                          ) AS targets
+                          """,
+                          (snapshot_collection_time,),
+                      )
+                      distinct_target_hours = cursor.fetchone()[0]
+
+                      if distinct_target_hours != 48:
+                          raise RuntimeError(
+                              f"Expected 48 distinct target hours; "
+                              f"found {distinct_target_hours}."
+                          )
+
+              print("Supabase forecast import and verification succeeded.")
               print(f"Snapshot file: {snapshot.name}")
+              print(f"Snapshot age at import: {age_hours:.2f} hours")
               print(f"Rows validated: {len(records)}")
               print(f"Rows inserted by this run: {inserted_count}")
               print(f"Rows already present before insert: {existing_before}")
               print(f"Rows stored for this snapshot: {existing_after}")
+              print(f"Distinct locations verified: {location_count}")
+              print(f"Distinct target hours verified: {distinct_target_hours}")
+              print("Each location has exactly 48 unique target hours.")
 
           except Exception as exc:
               sys.exit(
@@ -369,56 +653,3 @@ jobs:
           path: data/processed/temperature_forecast_snapshots/temperature_forecast_*.csv
           if-no-files-found: error
           retention-days: 30
-            - name: Check snapshot freshness
-        shell: bash
-        run: |
-          python - <<'PY'
-          import csv
-          import sys
-          from datetime import datetime, timezone
-          from pathlib import Path
-
-          output_dir = Path("data/processed/temperature_forecast_snapshots")
-          snapshots = sorted(
-              output_dir.glob("temperature_forecast_*.csv"),
-              key=lambda path: path.stat().st_mtime,
-              reverse=True,
-          )
-
-          if not snapshots:
-              sys.exit("No forecast snapshot found for freshness check.")
-
-          with snapshots[0].open(
-              "r", newline="", encoding="utf-8-sig"
-          ) as file:
-              reader = csv.DictReader(file)
-              first_row = next(reader, None)
-
-          if not first_row:
-              sys.exit("Forecast snapshot is empty.")
-
-          try:
-              collection_time = datetime.fromisoformat(
-                  first_row["collection_time_utc"].replace("Z", "+00:00")
-              )
-          except (KeyError, ValueError) as exc:
-              raise SystemExit("Invalid collection timestamp.") from exc
-
-          if collection_time.tzinfo is None:
-              sys.exit("Collection timestamp must include a timezone.")
-
-          age_hours = (
-              datetime.now(timezone.utc)
-              - collection_time.astimezone(timezone.utc)
-          ).total_seconds() / 3600
-
-          max_age_hours = 3.0
-          if age_hours < 0 or age_hours > max_age_hours:
-              sys.exit(
-                  f"Snapshot freshness check failed: age={age_hours:.2f}h, "
-                  f"maximum={max_age_hours:.2f}h."
-              )
-
-          print(f"Snapshot age: {age_hours:.2f} hours")
-          print("Freshness check passed.")
-          PY
