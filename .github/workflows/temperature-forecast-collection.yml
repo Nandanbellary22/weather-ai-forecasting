@@ -369,3 +369,56 @@ jobs:
           path: data/processed/temperature_forecast_snapshots/temperature_forecast_*.csv
           if-no-files-found: error
           retention-days: 30
+            - name: Check snapshot freshness
+        shell: bash
+        run: |
+          python - <<'PY'
+          import csv
+          import sys
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          output_dir = Path("data/processed/temperature_forecast_snapshots")
+          snapshots = sorted(
+              output_dir.glob("temperature_forecast_*.csv"),
+              key=lambda path: path.stat().st_mtime,
+              reverse=True,
+          )
+
+          if not snapshots:
+              sys.exit("No forecast snapshot found for freshness check.")
+
+          with snapshots[0].open(
+              "r", newline="", encoding="utf-8-sig"
+          ) as file:
+              reader = csv.DictReader(file)
+              first_row = next(reader, None)
+
+          if not first_row:
+              sys.exit("Forecast snapshot is empty.")
+
+          try:
+              collection_time = datetime.fromisoformat(
+                  first_row["collection_time_utc"].replace("Z", "+00:00")
+              )
+          except (KeyError, ValueError) as exc:
+              raise SystemExit("Invalid collection timestamp.") from exc
+
+          if collection_time.tzinfo is None:
+              sys.exit("Collection timestamp must include a timezone.")
+
+          age_hours = (
+              datetime.now(timezone.utc)
+              - collection_time.astimezone(timezone.utc)
+          ).total_seconds() / 3600
+
+          max_age_hours = 3.0
+          if age_hours < 0 or age_hours > max_age_hours:
+              sys.exit(
+                  f"Snapshot freshness check failed: age={age_hours:.2f}h, "
+                  f"maximum={max_age_hours:.2f}h."
+              )
+
+          print(f"Snapshot age: {age_hours:.2f} hours")
+          print("Freshness check passed.")
+          PY
