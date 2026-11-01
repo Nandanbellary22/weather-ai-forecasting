@@ -1,0 +1,18 @@
+﻿station_id,station_name,latitude,longitude,river,country,station_type,water_level,rainfall,rainfall_1h,rainfall_6h,rainfall_12h,rainfall_24h,rainfall_7to7,flood_stage,alarm_stage,mean_sea_level,water_level_sensor,rainfall_sensor,temperature_sensor,battery_sensor,water_quality_sensors,water_level_sensor_type,success_rate,last_status,last_measurement,telemetry_available
+019803,Tan Chau,10.80062,105.24802,Mekong,Viet Nam,HYCOS,2.3,0.0,0.0,4.0,4.0,4.0,17.0,4.5,3.5,0.0,True,True,True,True,False,RADAR,101,NORMAL,2026-10-29T22:15:00,True
+019804,My Thuan,10.27532,105.92632,Mekong,Viet Nam,HYCOS,1.049,0.0,0.0,2.0,2.0,2.0,4.0,1.8,1.6,0.0,True,True,True,True,False,RADAR,101,NORMAL,2026-10-29T22:15:00,True
+985203,Vam Kenh,10.2743,106.73714,Mekong,Viet Nam,HYCOS,0.949,0.0,0.0,0.0,0.0,0.0,,,,,True,True,True,True,False,RADAR,73,NODATA,2026-10-27T23:30:00,True
+440201,Kontum,14.34708,108.03423,Dak Bla,Viet Nam,HYCOS,,,,,,,,,,,True,True,True,True,False,RADAR,0,NODATA,,False
+450502,Giang Son,12.51017,108.18324,Krong Ana,Viet Nam,HYCOS,,,,,,,,425.0,421.0,427.9,True,True,True,True,False,RADAR,0,NODATA,,False
+450701,Duc Xuyen,12.29677,107.9759,Krong Kno,Viet Nam,HYCOS,,,,,,,,431.5,427.5,435.43,True,True,True,True,False,RADAR,0,NODATA,,False
+451305,Ban Don,12.89791,107.78313,Se Re Pok,Viet Nam,HYCOS,,,,,,,,17.5,17.1,179.95,True,True,True,True,False,RADAR,0,NODATA,,False
+908001,Cho Lach,10.279167,106.12472,Ham Luong,Viet Nam,DROUGHT,,,,,,,,,,,True,True,True,True,False,RADAR,0,NODATA,,False
+908002,My Hoa,10.2225,106.34917,Ham Luong,Viet Nam,DROUGHT,,,,,,,,,,,True,True,True,True,False,RADAR,0,NODATA,,False
+981702,Tra Vinh,9.975322,106.35421,Co Chien,Viet Nam,HYCOS,,,,,,,,,,,True,True,True,True,False,RADAR,0,NODATA,,False
+901503,Long Dinh,10.4,106.256386,Xang,Viet Nam,DROUGHT,,,,,,,,,,,True,True,True,True,False,RADAR,0,NODATA,,False
+039801,Chau Doc,10.70528,105.13351,Bassac,Viet Nam,HYCOS,2.341,0.0,0.5,9.5,9.5,9.5,0.0,4.0,3.0,0.0,True,True,True,True,False,RADAR,100,NORMAL,2026-10-29T22:15:00,True
+980601,Vam Nao,10.57865,105.36337,Vam Nao,Viet Nam,HYCOS,,,,,,,,,,,True,True,True,True,False,RADAR,0,NODATA,,False
+039803,Can Tho,10.052889,105.78714,Bassac,Viet Nam,HYCOS,1.342,0.0,0.0,0.0,0.0,0.0,0.5,1.9,1.7,0.0,True,True,True,True,False,RADAR,100,NORMAL,2026-10-29T22:15:00,True
+039812,Dai Ngai,9.734,106.074,Bassac,Viet Nam,HYCOS,0.546,0.0,0.0,0.0,0.0,0.0,18.2,,,,True,True,True,True,False,RADAR,100,NA,2026-10-29T22:15:00,True
+902602,Vi Thanh,9.7761,105.45861,Xa No,Viet Nam,DROUGHT,,,,,,,,,,,True,True,True,True,False,RADAR,0,NODATA,,False
+902601,Phung Hiep,9.81194,105.82361,Cai Con,Viet Nam,DROUGHT,1.279,0.0,0.0,0.0,0.0,0.0,2.6,,,,True,True,True,True,False,RADAR,101,NA,2026-10-29T22:15:00,True

@@ -17,7 +17,7 @@ data/raw/
 data/processed/*
 !data/processed/
 !data/processed/hydrology_reference_stations_68.csv
-
+!data/processed/mrc_vietnam_stations.csv
 # IDE
 .vscode/
 
@@ -37,3 +37,5 @@ decode_vndms.py
 
 _upload_snapshot/
 weather-ai-forecasting-upload.zip
+
+.env.local

@@ -52,6 +52,9 @@ jobs:
             fi
           done
 
+      - name: Initialize MRC database schema
+        run: python -u -m data_pipeline.database.ensure_mrc_schema
+
       - name: Collect MRC, EVN and national hydrology observations
         run: python -u -m agents.data_collector_agent --sources mrc evn hydrology
 
