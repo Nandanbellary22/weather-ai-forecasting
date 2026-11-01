@@ -1,3 +1,4 @@
+
 name: Hourly Hydrology, MRC and Reservoir Data Refresh
 
 on:
@@ -52,8 +53,11 @@ jobs:
             fi
           done
 
-      - name: Initialize MRC database schema
+      - name: Initialize application and MRC database schemas
         run: python -u -m data_pipeline.database.ensure_mrc_schema
+
+      - name: Synchronize active hydrology stations
+        run: python -u -m data_pipeline.database.sync_hydrology_stations
 
       - name: Collect MRC, EVN and national hydrology observations
         run: python -u -m agents.data_collector_agent --sources mrc evn hydrology
