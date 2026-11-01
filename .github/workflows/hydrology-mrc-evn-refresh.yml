@@ -1,5 +1,5 @@
 
-name: Hourly Hydrology, MRC and Reservoir Data Refresh
+name: Hourly Hydrology and MRC Data Refresh
 
 on:
   schedule:
@@ -62,11 +62,6 @@ jobs:
       - name: Collect MRC and national hydrology observations
         run: python -u -m agents.data_collector_agent --sources mrc hydrology
 
-      - name: Collect EVN reservoir observations
-        id: evn
-        continue-on-error: true
-        run: python -u -m agents.data_collector_agent --sources evn
-
       - name: Record completion
         if: success()
-        run: echo "MRC, EVN and hydrology collection completed successfully."
+        run: echo "MRC and hydrology collection completed successfully."
