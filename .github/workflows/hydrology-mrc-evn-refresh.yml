@@ -1,0 +1,60 @@
+name: Hourly Hydrology, MRC and Reservoir Data Refresh
+
+on:
+  schedule:
+    - cron: "47 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hydrology-mrc-evn-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    env:
+      PGHOST: ${{ secrets.SUPABASE_DB_HOST }}
+      PGPORT: "5432"
+      PGDATABASE: postgres
+      PGUSER: ${{ secrets.SUPABASE_DB_USER }}
+      PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      PGSSLMODE: require
+      PGCONNECT_TIMEOUT: "20"
+      HYDROLOGY_MAX_DATA_AGE_HOURS: "3"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: ""
+
+      - name: Install project dependencies
+        run: |
+          python -m pip install --disable-pip-version-check --upgrade pip
+          python -m pip install --disable-pip-version-check -r requirements.txt
+
+      - name: Verify required database configuration
+        shell: bash
+        run: |
+          for name in PGHOST PGUSER PGPASSWORD; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing required GitHub secret/configuration: $name"
+              exit 1
+            fi
+          done
+
+      - name: Collect MRC, EVN and national hydrology observations
+        run: python -u -m agents.data_collector_agent --sources mrc evn hydrology
+
+      - name: Record completion
+        if: success()
+        run: echo "MRC, EVN and hydrology collection completed successfully."
