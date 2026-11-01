@@ -59,8 +59,13 @@ jobs:
       - name: Synchronize active hydrology stations
         run: python -u -m data_pipeline.database.sync_hydrology_stations
 
-      - name: Collect MRC, EVN and national hydrology observations
-        run: python -u -m agents.data_collector_agent --sources mrc evn hydrology
+      - name: Collect MRC and national hydrology observations
+        run: python -u -m agents.data_collector_agent --sources mrc hydrology
+
+      - name: Collect EVN reservoir observations
+        id: evn
+        continue-on-error: true
+        run: python -u -m agents.data_collector_agent --sources evn
 
       - name: Record completion
         if: success()
