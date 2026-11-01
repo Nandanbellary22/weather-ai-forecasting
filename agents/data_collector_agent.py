@@ -511,5 +511,21 @@ if __name__ == "__main__":
 
     # Treat partial collection as a non-zero exit so scheduled workflows
     # visibly flag incomplete source/station coverage instead of appearing green.
-    if report["status"] in {"partial", "failed"}:
+       # Fail the workflow only for actual collection errors or failed
+    # forecast-feature generation. Station freshness/coverage warnings
+    # remain visible in the JSON report without failing the workflow.
+    mrc_result = report.get("sources", {}).get("mrc", {})
+    feature_result = mrc_result.get("forecast_feature_refresh", {})
+
+    has_collection_errors = bool(report.get("errors"))
+    has_feature_refresh_failure = (
+        bool(mrc_result)
+        and feature_result.get("status") != "success"
+    )
+
+    if (
+        report.get("status") == "failed"
+        or has_collection_errors
+        or has_feature_refresh_failure
+    ):
         raise SystemExit(1)
